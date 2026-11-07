@@ -263,3 +263,33 @@ lint and formatting passed. Actual Opus reviewed the incremental changes and
 found no concrete blockers. Its final synchronous-abort note was addressed by
 keeping cancellation inside the tracked Promise, preserving native async APIs.
 Live qualification is separate and pending T08.
+
+## H13 — Full inventory disguised as missed drops; mined counts treated as collected
+
+T08 inherited 36 occupied storage slots and no dirt stack. Three gather calls
+reported 78 mined blocks total but no inventory gain. The generic warning suggested
+looking for drops or gathering again. Qwen did both, then falsely recorded 46 dirt
+as collected. This combines insufficient native feedback with a model grounding
+failure; no combat interruption explains the daylight recovery loop.
+
+Expose Mineflayer's existing `emptySlotCount()` in inventory observations. After a
+failed pickup with zero free slots, stop the batch instead of mining more blocks.
+Existing stacks can still accept loot at zero empty slots, so successful merges
+continue. Report collected item deltas separately from mined counts. Zero inventory
+gain is a tool error with partial mining facts; full inventory gets the explicit
+`inventory_full` code and asks the model to make room. The model still decides
+what to store/discard. No loot predictor or automatic inventory manager is added.
+
+## H14 — Return could complete while airborne near the saved position
+
+T08 return summaries sometimes recorded fractional jump heights near the origin,
+with subsequent landings a level lower. Require ground contact before completing
+a ground return (water remains allowed). A regression verifies that passing the
+origin mid-jump does not release the interrupted task; it waits for landing.
+
+H13/H14 validation: 365 tests plus lint/format pass. Actual Opus review found no
+hard blockers; the pickup timing note is covered by waiting for inventory updates
+only when a full-slot pickup initially appears empty. Tests cover zero gain,
+existing-stack merges, delayed pickup and landing before return. The error
+explicitly warns against retrying without making room. Live recovery remains to
+be qualified; these changes do not make Qwen's prior invented state trustworthy.

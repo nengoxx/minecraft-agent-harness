@@ -5,6 +5,7 @@ const codes = new Set([
     'not_visible_or_range',
     'occupied_target',
     'missing_item',
+    'inventory_full',
     'missing_support',
     'action_failed',
     'code_error',

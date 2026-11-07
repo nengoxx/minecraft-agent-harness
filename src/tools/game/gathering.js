@@ -49,7 +49,8 @@ export function createGathering(ctx) {
                 minedAt = [];
             let mined = 0,
                 misses = 0,
-                stopCode = null;
+                stopCode = null,
+                stoppedForCapacity = false;
             const onAbort = () => {
                 try {
                     active.pathfinder.setGoal(null);
@@ -95,11 +96,25 @@ export function createGathering(ctx) {
                             !((skip.get(`${b.name}@${posKey(b.position)}`) ?? 0) > now),
                     );
                     if (!target) break;
+                    const beforeBlock = counts();
                     const outcome = await mineOne(active, target, Movements, goals, signal);
                     if (outcome === true) {
                         minedAt.push(target.position.clone());
                         mined++;
                         misses = 0;
+                        // Use the native window capacity API (also used by
+                        // collectblock). Existing stacks can still accept loot
+                        // with zero free slots, so stop only after a failed pickup.
+                        if (
+                            active.inventory.emptySlotCount?.() === 0 &&
+                            !Object.entries(counts()).some(([name, count]) => count > (beforeBlock[name] ?? 0))
+                        ) {
+                            await settleInventory(active);
+                            if (!Object.entries(counts()).some(([name, count]) => count > (beforeBlock[name] ?? 0))) {
+                                stoppedForCapacity = true;
+                                break;
+                            }
+                        }
                         continue;
                     }
                     if (signal?.aborted) throw signal.reason ?? abortError('Tool cancelled');
@@ -146,24 +161,31 @@ export function createGathering(ctx) {
                     far ? { nearest: { x: far.position.x, y: far.position.y, z: far.position.z } } : {},
                 );
             }
-            if (!signal?.aborted) await sweepDrops(active, minedAt, goals, signal);
+            if (!signal?.aborted && !stoppedForCapacity) await sweepDrops(active, minedAt, goals, signal);
             await settleInventory(active);
             const after = counts();
-            const gained = Object.keys(after).some(n => (after[n] ?? 0) > (before[n] ?? 0));
+            const inventoryDelta = Object.fromEntries(
+                [...new Set([...Object.keys(before), ...Object.keys(after)])]
+                    .map(n => [n, (after[n] ?? 0) - (before[n] ?? 0)])
+                    .filter(([, delta]) => delta),
+            );
+            const collected = Object.fromEntries(Object.entries(inventoryDelta).filter(([, delta]) => delta > 0));
+            const freeSlots = active.inventory.emptySlotCount?.() ?? null;
+            if (!Object.keys(collected).length)
+                throw failWith(
+                    freeSlots === 0 ? 'inventory_full' : 'action_failed',
+                    freeSlots === 0
+                        ? 'No items collected. Your inventory has no free slots. Make room before gathering again; retrying without room only mines more blocks without collecting them.'
+                        : 'No items collected. Mining did not increase inventory; inspect nearby drops before retrying.',
+                    { mined, requested: a.count, collected, inventoryDelta, freeSlots },
+                );
             return {
                 mined,
                 requested: a.count,
-                ...(gained
-                    ? {}
-                    : {
-                          dropsMissed:
-                              'Mined blocks but no drops reached your inventory; they may be stuck in leaves, water or out of reach. Look nearby with observe_world or gather again.',
-                      }),
-                inventoryDelta: Object.fromEntries(
-                    [...new Set([...Object.keys(before), ...Object.keys(after)])]
-                        .map(n => [n, (after[n] ?? 0) - (before[n] ?? 0)])
-                        .filter(([, delta]) => delta),
-                ),
+                collected,
+                inventoryDelta,
+                freeSlots,
+                ...(freeSlots === 0 ? { inventoryFull: true } : {}),
                 ...(skipped.length ? { skipped: skipped.slice(0, 5) } : {}),
                 note: 'Mined count is not pickup count; inspect inventory delta. May partially complete.',
             };

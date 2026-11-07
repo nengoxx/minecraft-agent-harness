@@ -8,6 +8,7 @@ export const item = i => i && { name: i.name, count: i.count, slot: i.slot };
 
 export function inventory(bot) {
     return {
+        freeSlots: bot.inventory.emptySlotCount?.() ?? null,
         items: bot.inventory.items().map(item),
         heldItem: item(bot.heldItem),
         equipment: bot.inventory.slots.slice(5, 9).map(item),

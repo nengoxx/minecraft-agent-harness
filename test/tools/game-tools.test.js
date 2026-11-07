@@ -1378,3 +1378,89 @@ test('craft reports a failure instead of success when the server never hands ove
     assert.equal(failureCode(out), 'action_failed');
     assert.match(out.details.error, /did not hand over the wooden_sword/);
 });
+
+for (const mergeSpace of [0, 2]) {
+    test(`gather with full slots ${mergeSpace ? 'fills an existing stack before stopping' : 'reports inventory_full after the first failed pickup'}`, async () => {
+        const { createRequire } = await import('node:module');
+        const b = bot();
+        b.registry = createRequire(import.meta.url)('minecraft-data')('1.21.6');
+        b.entity.position = new Vec3(0, 64, 0);
+        let dirt = 64 - mergeSpace,
+            mined = 0;
+        b.inventory.items = () => [{ name: 'dirt', count: dirt, slot: 9 }];
+        b.inventory.emptySlotCount = () => 0;
+        const targets = Array.from({ length: 5 }, (_, i) => ({
+            name: 'dirt',
+            position: new Vec3(i % 3, 64, Math.floor(i / 3)),
+            diggable: true,
+            canHarvest: () => true,
+        }));
+        b.blockAt = p => targets.find(b => b.position.equals(p)) ?? { name: 'air', position: p };
+        b.dig = async block => {
+            targets.splice(targets.indexOf(block), 1);
+            mined++;
+            if (dirt < 64) dirt++;
+        };
+        const { run } = setup({
+            bot: b,
+            world: { getNearestBlocks: () => targets },
+            perception: { isBlockVisible: () => true },
+        });
+        assert.equal((await run('inventory')).details.freeSlots, 0);
+        const output = await run('gather', { block: 'dirt', count: 5 });
+        assert.equal(mined, mergeSpace + 1);
+        if (mergeSpace) {
+            assert.equal(output.isError, undefined);
+            assert.deepEqual(output.details.result.collected, { dirt: 2 });
+            assert.equal(output.details.result.mined, 3);
+            assert.equal(output.details.result.inventoryFull, true);
+        } else {
+            assert.equal(output.isError, true);
+            assert.equal(failureCode(output), 'inventory_full');
+            assert.equal(output.details.facts.mined, 1);
+            assert.equal(output.details.facts.freeSlots, 0);
+            assert.deepEqual(output.details.facts.collected, {});
+            assert.match(output.content[0].text, /Make room/);
+        }
+    });
+}
+
+test('gather waits for delayed stack pickup before stopping on full slots', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { createRequire } = await import('node:module');
+    const b = bot();
+    b.registry = createRequire(import.meta.url)('minecraft-data')('1.21.6');
+    b.entity.position = new Vec3(0, 64, 0);
+    let dirt = 61,
+        mined = 0;
+    b.inventory = Object.assign(new EventEmitter(), {
+        items: () => [{ name: 'dirt', count: dirt, slot: 9 }],
+        slots: Array(46).fill(null),
+        emptySlotCount: () => 0,
+    });
+    const targets = [1, 2].map(x => ({
+        name: 'dirt',
+        position: new Vec3(x, 64, 0),
+        diggable: true,
+        canHarvest: () => true,
+    }));
+    b.blockAt = p => targets.find(b => b.position.equals(p)) ?? { name: 'air', position: p };
+    const pickup = () => {
+        dirt++;
+        b.inventory.emit('updateSlot');
+    };
+    b.dig = async block => {
+        targets.splice(targets.indexOf(block), 1);
+        if (++mined === 1) setTimeout(pickup, 700);
+        else pickup();
+    };
+    const { run } = setup({
+        bot: b,
+        world: { getNearestBlocks: () => targets },
+        perception: { isBlockVisible: () => true },
+    });
+    const output = await run('gather', { block: 'dirt', count: 2 });
+    assert.equal(output.isError, undefined);
+    assert.equal(output.details.result.mined, 2);
+    assert.deepEqual(output.details.result.collected, { dirt: 2 });
+});

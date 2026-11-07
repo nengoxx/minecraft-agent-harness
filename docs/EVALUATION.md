@@ -203,3 +203,39 @@ Evidence: `.agent-state/evaluation/T07-pursuit-return/`, including wire capture,
 final state, transcript, observer snapshots and result.json. The agent, proxy
 and wire relay stopped, and direct backend configuration was restored. H10–H12
 must be qualified before claiming this version improves Mindcraft's combat.
+
+## T08 — Sword use confirmed; scaffold qualification blocked by inventory recovery
+
+Source 0a40dee, clean dependency install, 361 tests/lint/format passing and actual
+Opus review. Started 21:03:06 UTC; ordinary task delivered 21:03:19 UTC. The request
+added collecting 32 dirt before finishing the partial house, because T07 consumed
+all dirt. World, inventory, invincibility and combat pillars were retained; this
+is exploratory, not controlled A/B. The process limit remained 45 minutes.
+
+Stopped by the operator at 21:25:00.201 UTC after three repeated dirt gathers
+with no inventory gain. This was a documented stall intervention, not the timer.
+Twenty defense encounters recorded fourteen target deaths (not independently
+attributed kills). All 48 native PvP swing events held a diamond sword. Pursuit
+and return occurred, with one environmental stop before return. No new scaffold
+was placed: live switching from dirt back to sword is still unqualified.
+
+Three gathers reported 32, 14 and 32 mined blocks, taking 71.584, 31.862 and 87.275
+seconds respectively. Each returned `inventoryDelta: {}` and a generic missed-drop
+warning. All 36 storage slots were full, with no dirt stack; no dirt was collected.
+Mineflayer predicts digging completion and emits the new air block, so those
+counters are not independent proof of server-accepted mining. Do not infer a new
+mining compatibility defect from them: full inventory already prevents dirt pickup.
+
+Qwen attempted unavailable armor, attacked an already-dead phantom, repeated
+pickup passes and gathering, then wrote a false collection claim and material
+counts into notes. The captured request before the armor response contained none
+of the invented chestplate/leggings or several entity IDs/coordinates. The
+backend response introduced those facts; that localizes the discrepancy beyond
+Pi's request construction but does not isolate model weights from backend behavior.
+An overlong DM and malformed shell/Python commands also consumed turns.
+
+No house construction or completion occurred. No operator gameplay, resource
+provisioning or mid-task coaching was supplied. The native equipment correction
+has useful live evidence, but this run does not establish better house capability
+than Mindcraft. Evidence: `.agent-state/evaluation/T08-weapon-coordination/`.
+Agent, proxy, wire relay and reused container stopped; direct model URL restored.

@@ -110,7 +110,7 @@ The model's explicit `attack` tool retains its existing bounded combat routine.
   phase within that budget. Return pathfinding may dig natural terrain, including
   its own dirt pillar. Cobblestone towers are disabled because the terrain guard
   would prevent digging down through them. Return is verified within 1.5 blocks
-  horizontally and less than one vertically. Unreachable mobs/return routes are
+  horizontally and less than one vertically, with ground contact (or water). Unreachable mobs/return routes are
   reported rather than called cleared. Leftover scaffolding is reported, not
   silently deleted. The origin survives unsuccessful back-to-back encounters
   until a return succeeds, new body work runs, or the bot respawns.

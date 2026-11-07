@@ -740,3 +740,26 @@ test('unacknowledged placements retain capacity; only explicit refusals refund i
     assert.equal(result.resumeAllowed, false);
     assert.equal(result.reason, 'placement_uncertain');
 });
+
+test('return does not complete during a jump near the work origin', async () => {
+    const f = fixture();
+    f.bot.entity.onGround = true;
+    enemy(f.bot, 1);
+    let airborneChecks = 0;
+    const { result } = await encounter(f, {
+        step: async () => {
+            if (f.bot.pvp.target) {
+                f.bot.entity.position = new Vec3(0, 64.5, 0);
+                f.bot.entity.onGround = false;
+                killCurrent(f);
+            } else {
+                airborneChecks++;
+                f.bot.entity.position = new Vec3(0, 64, 0);
+                f.bot.entity.onGround = true;
+            }
+        },
+    });
+    assert.equal(airborneChecks, 1, 'must wait for landing before declaring return');
+    assert.equal(result.returned, true);
+    assert.equal(result.stoppedAt.y, 64);
+});

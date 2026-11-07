@@ -291,7 +291,11 @@ export async function defendArea(
                     bot.pathfinder.setGoal(home);
                 }
                 const p = bot.entity.position;
-                if (Math.hypot(p.x - origin.x, p.z - origin.z) <= 1.5 && Math.abs(p.y - origin.y) < 1) {
+                if (
+                    (bot.entity.onGround !== false || bot.entity.isInWater) &&
+                    Math.hypot(p.x - origin.x, p.z - origin.z) <= 1.5 &&
+                    Math.abs(p.y - origin.y) < 1
+                ) {
                     returned = true;
                     break;
                 }
