@@ -120,5 +120,5 @@ startup errors on the first attempt. Errors print as one line on stderr and the 
 
 ## Movement packets
 
-Mineflayer sends a position packet every physics tick. The harness throttles these to one per 50 ms but always
-delivers the newest state of each packet kind, including mid-jump positions.
+The pinned upstream Mineflayer revision owns physics pacing, teleport replies and client tick boundaries.
+The harness does not buffer movement packets: delaying them separately can break their ordering with `tick_end`.

@@ -1,6 +1,5 @@
 import { installRespawn } from './body/respawn.js';
 import { once } from 'node:events';
-import { installOxygenIsolation } from './body/oxygen.js';
 import { installDamageTypes, causeLabel, formatHitAlert } from './body/hurt-cause.js';
 import { installDifficulty, currentDifficulty } from './body/difficulty.js';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -92,7 +91,6 @@ export async function startAgent(settings, options = {}) {
     const bot = initBot(name);
     bot.pi_no_flight = options.allowFlight !== true;
     const pacer = paceBot(bot, { tickRate, emit: (e, f) => record(e, f) });
-    installOxygenIsolation(bot);
     installDamageTypes(bot);
     installDifficulty(bot);
     {

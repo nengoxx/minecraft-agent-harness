@@ -82,34 +82,6 @@ export function installAsciiChat(bot) {
     return bot;
 }
 
-export const MOVEMENT_PACKETS = new Set(['position', 'position_look', 'look']);
-
-export function throttleMovementPackets(client, intervalMs = 50, clock = { now: Date.now, setTimeout, clearTimeout }) {
-    const originalWrite = client.write.bind(client);
-    const pending = new Map();
-    let last = -Infinity,
-        timer = null;
-    const flush = () => {
-        timer = null;
-        last = clock.now();
-        const batch = [...pending.entries()];
-        pending.clear();
-        for (const [name, data] of batch) originalWrite(name, data);
-    };
-    client.write = function (name, data) {
-        if (!MOVEMENT_PACKETS.has(name)) return originalWrite(name, data);
-        const now = clock.now();
-        if (now - last >= intervalMs && !timer) {
-            last = now;
-            return originalWrite(name, data);
-        }
-        pending.delete(name);
-        pending.set(name, data);
-        timer ??= clock.setTimeout(flush, Math.max(0, intervalMs - (now - last)));
-    };
-    return client;
-}
-
 export function initBot(username) {
     mc_version = settings.minecraft_version;
     const options = {
@@ -128,7 +100,7 @@ export function initBot(username) {
 
     const bot = createBot(options);
 
-    throttleMovementPackets(bot._client);
+    // Mineflayer owns movement pacing and tick-end packet ordering.
     bot.once('login', () => installAsciiChat(bot));
 
     const originalEmit = bot._client.emit.bind(bot._client);

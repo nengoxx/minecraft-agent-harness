@@ -725,6 +725,7 @@ async function nativeFixture() {
     b.registry = require('minecraft-data')('1.21.6');
     b.version = '1.21.6';
     b.supportFeature = feature => b.registry.supportFeature(feature);
+    require('mineflayer/lib/plugins/sequence.js')(b);
     return { b, packets, require, Vec3 };
 }
 

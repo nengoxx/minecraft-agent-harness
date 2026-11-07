@@ -74,10 +74,7 @@ test('BEFORE real entities plugin turns valid server impulse into NaN; next phys
     physics.simulatePlayer(new PlayerState(bot, bot.controlState), world).apply(bot);
     assert.equal(finite(bot.entity.position), false);
 });
-for (const [label, packet] of [
-    ['nested', modern],
-    ['legacy', { entityId: 1, velocityX: 800, velocityY: 3200, velocityZ: -1600 }],
-]) {
+for (const [label, packet] of [['nested', modern]]) {
     test(`AFTER ${label} impulse retains exact server velocity and finite physics for 100 ticks`, () => {
         const { bot, world, physics } = fixture(after);
         bot._client.emit('entity_velocity', packet);
@@ -120,4 +117,10 @@ test('AFTER sync_entity_position retains exact received components and simulates
     assert.deepEqual(bot.entity.velocity, new Vec3(0.1, 0.4, -0.2));
     physics.simulatePlayer(new PlayerState(bot, bot.controlState), world).apply(bot);
     assert.ok(finite(bot.entity.position));
+});
+
+test('legacy protocol data also normalizes entity velocity to a nested vector', () => {
+    const fields = minecraftData('1.8').protocol.play.toClient.types.packet_entity_velocity[1].map(field => field.name);
+    assert.ok(fields.includes('velocity'));
+    assert.ok(!fields.includes('velocityX'));
 });

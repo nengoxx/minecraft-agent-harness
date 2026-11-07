@@ -2,14 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
-import { installOxygenIsolation } from '../../src/body/oxygen.js';
 
 const require = createRequire(import.meta.url);
 const injectEntities = require('mineflayer/lib/plugins/entities.js');
 const injectBreath = require('mineflayer/lib/plugins/breath.js');
 const registry = require('minecraft-data')('1.21.6');
 const Entity = require('prismarine-entity')('1.21.6');
-function fixture({ patched = true, beforePlugins = true } = {}) {
+function fixture() {
     const bot = Object.assign(new EventEmitter(), {
         version: '1.21.6',
         registry,
@@ -18,7 +17,6 @@ function fixture({ patched = true, beforePlugins = true } = {}) {
         oxygenLevel: 20,
         health: 20,
     });
-    if (patched && beforePlugins) installOxygenIsolation(bot);
     injectEntities(bot);
     injectBreath(bot);
     for (const [id, name] of [
@@ -29,7 +27,6 @@ function fixture({ patched = true, beforePlugins = true } = {}) {
         bot.entities[id] = Object.assign(new Entity(id), { name });
     }
     bot.entity = bot.entities[1];
-    if (patched && !beforePlugins) installOxygenIsolation(bot);
     const breaths = [],
         updates = [],
         crouches = [];
@@ -45,21 +42,21 @@ function fixture({ patched = true, beforePlugins = true } = {}) {
     return { bot, breaths, updates, crouches, key, send };
 }
 
-test('reproduces actual installed entities plugin attributing foreign air to bot', () => {
-    const { bot, breaths, send } = fixture({ patched: false });
+test('installed entities plugin already isolates player oxygen from foreign metadata', () => {
+    const { bot, breaths, send } = fixture();
     assert.equal(bot.supportFeature('mcDataHasEntityMetadata'), true);
     send(2, 165);
-    assert.equal(bot.oxygenLevel, 11);
+    assert.equal(bot.oxygenLevel, 20);
     send(3, 6000);
-    assert.equal(bot.oxygenLevel, 400);
+    assert.equal(bot.oxygenLevel, 20);
     send(1, 285);
     assert.equal(bot.oxygenLevel, 19);
-    assert.deepEqual(breaths, [11, 400, 19]);
+    assert.deepEqual(breaths, [19]);
 });
 
 test('actual plugin preserves foreign metadata but only reports own oxygen, including genuinely low/zero air', () => {
-    for (const beforePlugins of [true, false]) {
-        const { bot, breaths, updates, crouches, key, send } = fixture({ beforePlugins });
+    {
+        const { bot, breaths, updates, crouches, key, send } = fixture();
         send(2, 165, [{ key: key(2, 'shared_flags'), type: 'byte', value: 2 }]);
         send(3, 6000);
         assert.equal(bot.oxygenLevel, 20);
@@ -110,30 +107,6 @@ test('nested foreign metadata inside own dispatch cannot suppress genuine own br
     send(1, 0);
     assert.equal(bot.oxygenLevel, 0);
     assert.deepEqual(breaths, [0]);
-});
-
-test('metadata exception restores dispatch scope; installation is idempotent and per bot', () => {
-    const { bot, breaths, send } = fixture();
-    const clientEmit = bot._client.emit,
-        botEmit = bot.emit;
-    assert.equal(installOxygenIsolation(bot), bot);
-    assert.equal(bot._client.emit, clientEmit);
-    assert.equal(bot.emit, botEmit);
-    const fail = () => {
-        throw new Error('synthetic listener failure');
-    };
-    bot.on('entityUpdate', fail);
-    assert.throws(() => send(2, 165), /synthetic listener failure/);
-    bot.removeListener('entityUpdate', fail);
-    send(1, 15);
-    assert.equal(bot.oxygenLevel, 1);
-    assert.deepEqual(breaths, [1]);
-    bot.oxygenLevel = 17;
-    bot.emit('breath');
-    assert.deepEqual(breaths, [1, 17]);
-    const untouched = fixture({ patched: false });
-    untouched.send(2, 165);
-    assert.equal(untouched.bot.oxygenLevel, 11);
 });
 
 test('pre-login foreign metadata cannot initialize oxygen; entity id is resolved anew after replacement', () => {

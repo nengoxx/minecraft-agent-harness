@@ -1,0 +1,141 @@
+--- a/node_modules/mineflayer/lib/plugins/digging.js
++++ b/node_modules/mineflayer/lib/plugins/digging.js
+@@ -247,6 +247,9 @@
+       enchantments = enchantments.concat(helmetEnchantments)
+     }
+ 
++    if (block.material === 'incorrect_for_wooden_tool')
++      block.material = 'mineable/pickaxe'
++
+     const creative = bot.game.gameMode === 'creative'
+     return block.digTime(
+       type,
+--- a/node_modules/mineflayer/lib/plugins/inventory.js
++++ b/node_modules/mineflayer/lib/plugins/inventory.js
+@@ -30,9 +30,12 @@
+   let eatingTask = createDoneTask()
+ 
+   let nextActionNumber = 0 // < 1.17
+-  let stateId = -1
++  const stateIds = new Map()
+   if (bot.supportFeature('stateIdUsed')) {
+-    const listener = packet => { stateId = packet.stateId }
++    const listener = packet => {
++      const id = packet.windowId === -1 || packet.windowId === -2 ? (bot.currentWindow?.id ?? 0) : packet.windowId
++      stateIds.set(id, packet.stateId)
++    }
+     bot._client.on('window_items', listener)
+     bot._client.on('set_slot', listener)
+   }
+@@ -439,6 +442,7 @@
+       windowId: window.id
+     })
+     copyInventory(window)
++    if (window.id !== 0) stateIds.delete(window.id)
+     lastClosedWindow = window
+     bot.currentWindow = null
+     bot.emit('windowClose', window)
+@@ -571,6 +575,31 @@
+     }
+ 
+     return changedSlots
++  }
++
++  // Taking a crafting result uses up one of each ingredient in the grid, and the
++  // vanilla client reports those grid slots along with the click. acceptClick
++  // knows nothing about recipes, so without this the click claims the grid is
++  // unchanged. The server then corrects each grid slot, and a correction that
++  // arrives after the next craft has put its ingredients down erases them from
++  // the client's model: the clicks that follow act on items that aren't there.
++  function takeCraftingIngredients (window, click, resultCount) {
++    const gridSize = window.type === 'minecraft:inventory' ? 4 : window.type === 'minecraft:crafting' ? 9 : 0
++    if (!gridSize || click.slot !== window.craftingResultSlot || !resultCount) return []
++    if ((window.slots[click.slot]?.count ?? 0) >= resultCount) return [] // the result wasn't taken
++    const changed = []
++    for (let slot = click.slot + 1; slot <= click.slot + gridSize; slot++) {
++      const item = window.slots[slot]
++      if (!item) continue
++      let left = null
++      if (item.count > 1) {
++        left = Item.fromNotch(Item.toNotch(item))
++        left.count = item.count - 1
++      }
++      window.updateSlot(slot, left)
++      changed.push(slot)
++    }
++    return changed
+   }
+ 
+   async function clickWindow (slot, mouseButton, mode) {
+@@ -611,7 +640,9 @@
+           // 5,
+           // 6
+         ].includes(click.mode)) {
++        const resultCount = click.item?.count ?? 0
+         changedSlots = window.acceptClick(click)
++        if (click.mode === 0) changedSlots.push(...takeCraftingIngredients(window, click, resultCount))
+       } else {
+         // this is used as a fallback
+         const oldSlots = JSON.parse(JSON.stringify(window.slots))
+@@ -633,7 +664,7 @@
+     if (bot.supportFeature('stateIdUsed')) { // 1.17.1 +
+       bot._client.write('window_click', {
+         windowId: window.id,
+-        stateId,
++        stateId: stateIds.get(window.id) ?? -1,
+         slot,
+         mouseButton,
+         mode,
+@@ -771,6 +802,7 @@
+   bot._client.on('close_window', (packet) => {
+     // close window
+     const oldWindow = bot.currentWindow
++    if (oldWindow && oldWindow.id !== 0) stateIds.delete(oldWindow.id)
+     bot.currentWindow = null
+     bot.emit('windowClose', oldWindow)
+   })
+@@ -778,6 +810,7 @@
+   // the closed one's id and its early sync must not be taken for a trailing one.
+   bot._client.on('respawn', () => { lastClosedWindow = null })
+   bot._client.on('login', () => {
++    stateIds.clear()
+     lastClosedWindow = null
+     // close window when switch subserver
+     windowItems = null
+--- a/node_modules/mineflayer/lib/plugins/craft.js
++++ b/node_modules/mineflayer/lib/plugins/craft.js
+@@ -18,6 +18,7 @@
+     try {
+       for (let i = 0; i < count; i++) {
+         await craftOnce(recipe, craftingTable)
++        if (!craftingTable) await settleInventoryGrid()
+       }
+ 
+       if (windowCraftingTable) {
+@@ -31,8 +32,26 @@
+       if (windowCraftingTable) {
+         bot.closeWindow(windowCraftingTable)
+         windowCraftingTable = undefined
++      } else if (!craftingTable) {
++        await settleInventoryGrid().catch(() => {})
+       }
+       throw new Error(err)
++    }
++  }
++
++  // The 2x2 grid lives in the inventory, which is never closed, so nothing makes the
++  // server confirm a craft there the way closing a crafting table does. Sync before
++  // the next craft builds on the client's model. Anything still in the grid or on the
++  // cursor would spoil the next recipe: closing the inventory makes the server put it
++  // back into the inventory. After a desync the server may already be sending a full
++  // state of its own, which ends a sync early with an older picture, so check again.
++  async function settleInventoryGrid () {
++    if (!bot.supportFeature('stateIdUsed')) return
++    const inv = bot.inventory
++    for (let tries = 0; tries < 3; tries++) {
++      await bot._syncWindow(inv)
++      if (!inv.selectedItem && [1, 2, 3, 4].every(slot => !inv.slots[slot])) return
++      bot._client.write('close_window', { windowId: 0 })
+     }
+   }
+ 
