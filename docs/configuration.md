@@ -40,6 +40,11 @@ connect; the bundled protocol patches target 1.21.6.
 | `--no-reconnect` | `AGENT_RECONNECT=false`  | `reconnect`         | reconnect on   | exit on the first kick or disconnect instead of reconnecting                       |
 | `--tools-module` | `AGENT_TOOLS_MODULE`     | `toolsModule`       | none           | an ES module that adds tools; `toolOptions` in a config file is passed to it       |
 
+`--auto-defense` / `AGENT_AUTO_DEFENSE` / `autoDefense` enables native defense
+(default false). It keeps running during model reasoning and shares the existing
+action runner with game tools. See [architecture](architecture.md#automatic-defense)
+for target policy, interruption recovery and limits.
+
 A tools module exports a default function. It receives `{ bot, name, team, options, schema }` and returns a list of
 tools, each `{ name, description, properties, required, body, run(args, { bot, signal }) }`. `schema` has the same
 `text`, `integer`, `number` and `choice` helpers the built-in tools use. Extra tools go through the same argument

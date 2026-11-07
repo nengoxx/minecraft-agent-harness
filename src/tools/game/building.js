@@ -29,7 +29,7 @@ export function createBuilding(ctx) {
         tower,
         walkTo,
     } = ctx;
-    async function placeBlock(active, a, signal) {
+    async function placeBlock(active, a, signal, reportProgress = () => {}) {
         if (['air', 'cave_air', 'void_air'].includes(a.block))
             throw failWith('validation', 'Removing a block requires explicit break_block.', {
                 reason: 'place cannot remove blocks',
@@ -98,6 +98,7 @@ export function createBuilding(ctx) {
             }
         }
         const scaffolded = [];
+        reportProgress({ inFlight: cell, scaffoldLeft: scaffolded });
         let bridgeTried = null;
         const bridge = async () => {
             let b;
@@ -328,14 +329,14 @@ export function createBuilding(ctx) {
         'place',
         'Place one block at (x,y,z). Moves you first if needed: walks or climbs, or builds temporary dirt scaffolding, to a spot within reach with a clear view of a solid neighbouring face; over a drop (e.g. building a bridge out from an edge) it stands on the block beside the target, sneaks to its edge and places against its side, like a player bridging; then makes ONE placement attempt and removes the scaffolding it built. If the cell holds natural terrain (grass, dirt, stone, sand, leaves...) it mines that out first; built blocks are never removed. Result reports the movement taken (none/walk/climb/scaffold). Failures return code, reason, next (a suggested call), repeat (this cell failed before) and, for no_support, missingSupport (which block to place first).',
         { ...coords, block: name },
-        (a, { bot: active, signal }) => placeBlock(active, a, signal),
+        (a, { bot: active, signal, reportProgress }) => placeBlock(active, a, signal, reportProgress),
         { ...body, required: ['x', 'y', 'z', 'block'] },
     );
     add(
         'place_line',
         'Batch of place calls: up to 64 identical blocks in a straight line from (x,y,z) stepping +1 along axis (negative count steps -1). Each cell is one place() (same movement and scaffolding rules); cells already holding this block are skipped; a cell that fails is skipped and the line continues (stops after 6 failures in a row). Failures are listed with reason and next step.',
         { block: name, ...coords, axis: choice(['x', 'y', 'z']), count: integer(-64, 64) },
-        async (a, { bot: active, signal, deadline }) => {
+        async (a, { bot: active, signal, deadline, reportProgress = () => {} }) => {
             const n = Math.abs(a.count),
                 step = Math.sign(a.count) || 1;
             if (!n) throw withFailureCode(new Error('count must be non-zero.'), 'validation');
@@ -346,6 +347,23 @@ export function createBuilding(ctx) {
             let failure = null,
                 stoppedEarly = null,
                 streak = 0;
+            const progress = (inFlight, extra = {}) =>
+                reportProgress({
+                    ...extra,
+                    placed: [...placed],
+                    skipped: [...skipped],
+                    placedCount: placed.length,
+                    requested: n,
+                    failedCount: failures.length,
+                    notAttempted: n - placed.length - skipped.length - failures.length,
+                    ...(inFlight
+                        ? {
+                              inFlight,
+                              note: 'Recheck this cell after interruption; placement may have reached the server.',
+                          }
+                        : {}),
+                });
+            progress();
             const end = Number.isFinite(deadline) ? deadline : Date.now() + PLACE_LINE_MS;
             const softEnd = end - Math.min(PLACE_MS, (end - Date.now()) / 2);
             for (let i = 0; i < n; i++) {
@@ -355,11 +373,15 @@ export function createBuilding(ctx) {
                     break;
                 }
                 const pos = { x: a.x, y: a.y, z: a.z, [a.axis]: a[a.axis] + i * step };
+                progress(pos);
                 try {
-                    const r = await placeBlock(active, { block: a.block, ...pos }, signal);
+                    const r = await placeBlock(active, { block: a.block, ...pos }, signal, extra =>
+                        progress(pos, extra),
+                    );
                     if (r.alreadyPresent) skipped.push(pos);
                     else placed.push(pos);
                     moves[r.movement.mode] = (moves[r.movement.mode] ?? 0) + 1;
+                    progress();
                 } catch (error) {
                     if (signal?.aborted || error?.name === 'AbortError') throw error;
                     const f = {

@@ -12,8 +12,12 @@ export function buildSystemPrompt({
     sharedMachine = false,
     sharedPath = '/shared',
     canFly = false,
+    autoDefense = false,
     difficulty,
 }) {
+    const defenseRule = autoDefense
+        ? 'Automatic defense handles nearby mobs while you think. Continue your requested task; inspect automaticDefense in observations for outcomes or unresolved threats. interruptedBy: defense reports preserved partial work; resumedAfterDefense means the same safe action continued. Do not restart finished work or replay crafting blindly.'
+        : '';
     const rules = gameMode === 'creative' ? '' : difficultyRules(difficulty);
     const slowWorld =
         tickRate < 20
@@ -34,6 +38,7 @@ export function buildSystemPrompt({
                 ? `shared_exec runs commands on the team's shared machine, with internet access and files under ${sharedPath}. Everyone on the team can read and write those files.`
                 : '',
             slowWorld,
+            defenseRule,
             rules,
             vision
                 ? 'Each turn includes a first-person screenshot (approximate renderer) alongside the text survey.'
@@ -52,6 +57,7 @@ export function buildSystemPrompt({
         `You are ${name}, an autonomous Minecraft ${gameMode} player among other players.`,
         `Objective: ${objective}`,
         slowWorld,
+        defenseRule,
         rules,
         personality ? `Your private disposition: ${personality}` : '',
         vision

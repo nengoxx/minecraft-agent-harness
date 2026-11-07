@@ -1,13 +1,14 @@
 import { KEEP_MOVING_TOOLS } from '../tools/game-tools.js';
 import { isStarvationDamage } from './hurt-cause.js';
 
-export function installDamageWake(bot, getRunner, actionRunner) {
+export function installDamageWake(bot, getRunner, actionRunner, handled = () => false) {
     let lastHealth = bot.health;
     bot.on('health', () => {
         const lost = bot.health < lastHealth;
         lastHealth = bot.health;
         const active = actionRunner.status.active;
         if (!lost || bot.health <= 0) return;
+        if (handled()) return;
         if (isStarvationDamage(bot)) {
             getRunner()?.enqueue(
                 { kind: 'damage', cause: 'starvation', health: bot.health, hunger: bot.food },

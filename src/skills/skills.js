@@ -20,7 +20,7 @@ async function autoLight(bot) {
     return false;
 }
 
-async function equipHighestAttack(bot) {
+export async function equipHighestAttack(bot) {
     let weapons = bot.inventory
         .items()
         .filter(item => item.name.includes('sword') || (item.name.includes('axe') && !item.name.includes('pickaxe')));

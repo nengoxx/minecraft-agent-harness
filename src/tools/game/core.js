@@ -2,6 +2,12 @@ import { abortError, failureCode, failureFacts, withFailureCode } from './failur
 import { CHEST_MS, CRAFT_MS, GATHER_MS, PLACE_LINE_MS, PLACE_MS, SMELT_MS, requireFunction } from './runtime.js';
 import { integer, object, result, validate } from './schema.js';
 
+const counts = bot => {
+    const out = {};
+    for (const item of bot.inventory?.items?.() ?? []) out[item.name] = (out[item.name] ?? 0) + item.count;
+    return out;
+};
+
 export function createCore(ctx) {
     const { bot, goToHint, perception, runner, skills, tools } = ctx;
     const leaveBed = async active => {
@@ -29,6 +35,8 @@ export function createCore(ctx) {
             parameters,
             async execute(_id, args, signal) {
                 let code = 'validation';
+                const interruptedAttempts = [];
+                const inventoryBefore = body ? counts(bot) : null;
                 try {
                     validate(parameters, args);
                     code = 'unknown';
@@ -64,27 +72,46 @@ export function createCore(ctx) {
                     if (body) bot.on?.('pi_hit', onHit);
                     let value;
                     try {
-                        value = body
-                            ? await runner.run(toolName, invoke, {
-                                  signal,
-                                  timeoutMs:
-                                      args.timeout_ms ??
-                                      {
-                                          go_to: 90000,
-                                          place: PLACE_MS,
-                                          place_line: PLACE_LINE_MS,
-                                          gather: GATHER_MS,
-                                          return_to_surface: 120000,
-                                          flee: 65000,
-                                          door: 30000,
-                                          go_through_door: 45000,
-                                          craft: CRAFT_MS,
-                                          smelt: SMELT_MS,
-                                          deposit: CHEST_MS,
-                                          withdraw: CHEST_MS,
-                                      }[toolName],
-                              })
-                            : await invoke({ bot, signal });
+                        for (;;) {
+                            try {
+                                value = body
+                                    ? await runner.run(toolName, invoke, {
+                                          signal,
+                                          timeoutMs:
+                                              args.timeout_ms ??
+                                              {
+                                                  go_to: 90000,
+                                                  place: PLACE_MS,
+                                                  place_line: PLACE_LINE_MS,
+                                                  gather: GATHER_MS,
+                                                  return_to_surface: 120000,
+                                                  flee: 65000,
+                                                  door: 30000,
+                                                  go_through_door: 45000,
+                                                  craft: CRAFT_MS,
+                                                  smelt: SMELT_MS,
+                                                  deposit: CHEST_MS,
+                                                  withdraw: CHEST_MS,
+                                              }[toolName],
+                                      })
+                                    : await invoke({ bot, signal });
+                                break;
+                            } catch (error) {
+                                if (
+                                    !runner.canResume?.(error) ||
+                                    signal?.aborted ||
+                                    failureFacts.get(error)?.partial?.scaffoldLeft?.length ||
+                                    !['place', 'place_line', 'go_to'].includes(toolName) ||
+                                    interruptedAttempts.length >= 2
+                                )
+                                    throw error;
+                                interruptedAttempts.push(failureFacts.get(error) ?? {});
+                            }
+                        }
+                        if (interruptedAttempts.length && value?.completed) {
+                            value.resumedAfterDefense = interruptedAttempts.length;
+                            value.interruptedAttempts = interruptedAttempts;
+                        }
                     } finally {
                         if (body) bot.off?.('pi_hit', onHit);
                     }
@@ -123,6 +150,23 @@ export function createCore(ctx) {
                         }
                     }
                     let facts = failureFacts.get(error);
+                    if (body && error.name === 'AbortError') {
+                        const after = counts(bot),
+                            inventoryDelta = {};
+                        for (const name of new Set([...Object.keys(inventoryBefore), ...Object.keys(after)])) {
+                            const delta = (after[name] ?? 0) - (inventoryBefore[name] ?? 0);
+                            if (delta) inventoryDelta[name] = delta;
+                        }
+                        const p = bot.entity?.position;
+                        facts = {
+                            ...facts,
+                            inventoryDelta,
+                            stoppedAt: p ? { x: p.x, y: p.y, z: p.z } : null,
+                            ...(error.preemptedBy ? { interruptedBy: error.preemptedBy } : {}),
+                            ...(interruptedAttempts.length ? { interruptedAttempts } : {}),
+                            note: 'Partial work may remain. Verify state before continuing; do not replay resource-consuming actions blindly.',
+                        };
+                    }
                     if (toolName === 'go_to' && code === 'timeout') {
                         try {
                             const p = bot.entity.position,

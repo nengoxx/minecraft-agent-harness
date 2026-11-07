@@ -15,6 +15,7 @@ export const DEFAULTS = Object.freeze({
     vision: false,
     respawn: true,
     allowFlight: false,
+    autoDefense: false,
     stateDir: '.agent-state',
 });
 
@@ -40,6 +41,7 @@ const ENV = {
     durationMinutes: 'AGENT_DURATION_MINUTES',
     respawn: 'AGENT_RESPAWN',
     allowFlight: 'AGENT_ALLOW_FLIGHT',
+    autoDefense: 'AGENT_AUTO_DEFENSE',
     quiet: 'AGENT_QUIET',
     reconnect: 'AGENT_RECONNECT',
     personality: 'AGENT_PERSONALITY',
@@ -149,6 +151,7 @@ export function resolveConfig(
         vision: bool(raw.vision),
         respawn: bool(raw.respawn),
         allowFlight: bool(raw.allowFlight),
+        autoDefense: bool(raw.autoDefense),
         quiet: bool(raw.quiet ?? false),
         reconnect: raw.reconnect === undefined ? true : bool(raw.reconnect),
         sandbox: {
@@ -209,6 +212,7 @@ export function toAgentOptions(config) {
         tickRate: config.tickRate,
         respawn: config.respawn,
         allowFlight: config.allowFlight,
+        autoDefense: config.autoDefense,
         sandbox: config.sandbox,
         sharedMachineSocket: config.sharedMachineSocket,
         sharedMachinePath: config.sharedMachinePath,

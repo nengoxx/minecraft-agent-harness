@@ -69,3 +69,13 @@ export function formatHitAlert(unseen, health) {
         : '';
     return `YOU WERE HIT ${unseen.length}x since your last look: ${parts.join('; ')}. Health now ${Math.round(health)}/20.${fight}`;
 }
+
+// Defense yields to environmental/player danger without treating every mob hit
+// as a new model decision. Manual attack retains its existing other-target stop.
+export function combatStopReason(action, source, cause, targetId) {
+    if (!['attack', 'self_defense'].includes(action)) return null;
+    if (!source && cause !== 'starve') return 'environment_damage';
+    if (source && source.id !== targetId && (action === 'attack' || source.type === 'player' || source.username))
+        return `hit_by_other: ${source.username ?? source.name ?? source.id}`;
+    return null;
+}

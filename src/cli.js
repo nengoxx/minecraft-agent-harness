@@ -32,6 +32,7 @@ const RUN_OPTIONS = {
     duration: { type: 'string' },
     'no-respawn': { type: 'boolean' },
     'allow-flight': { type: 'boolean' },
+    'auto-defense': { type: 'boolean' },
     personality: { type: 'string' },
     'soul-file': { type: 'string' },
     'tools-module': { type: 'string' },
@@ -62,6 +63,7 @@ const FLAG_TO_KEY = {
     'state-dir': 'stateDir',
     duration: 'durationMinutes',
     'allow-flight': 'allowFlight',
+    'auto-defense': 'autoDefense',
     personality: 'personality',
     'soul-file': 'soulFile',
     'tools-module': 'toolsModule',
@@ -90,6 +92,7 @@ Agent
       --duration <minutes>   stop after this long             (default: run until stopped)
       --no-respawn           permanent death
       --allow-flight         let creative-mode agents fly
+      --auto-defense         native defense while the model thinks (default off)
       --vision               attach a first-person render to every turn (experimental, see docs)
       --tick-rate <tps>      server tick rate if it runs below 20
       --no-reconnect         exit instead of reconnecting after a kick or disconnect

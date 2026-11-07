@@ -291,6 +291,7 @@ test('scaffold left by an aborted place is never dug by a later action (may be a
     w.b.placeBlock = realPlace;
     const dirt = [...w.cells.entries()].filter(([, n]) => n === 'dirt').map(([k]) => k);
     assert.ok(dirt.length > 0, 'abort left scaffold');
+    assert.deepEqual(r.details.facts.partial.scaffoldLeft.map(key).sort(), [...dirt].sort());
     const dugBefore = w.dug.length;
     const r2 = await run('place', { x: 1, y: -54, z: 3, block: 'oak_planks' });
     const res = r2.details.result ?? r2.details.facts ?? r2.details;
@@ -323,4 +324,67 @@ test('place_line margin follows the real action deadline (timeout_ms)', async ()
     } finally {
         Date.now = realNow;
     }
+});
+
+test('defense interruption preserves a placement checkpoint and resumes without placing a cell twice', async () => {
+    const w = makeWorld(floor);
+    const runner = createActionRunner(w.b);
+    const tools = createGameTools({
+        bot: w.b,
+        perception,
+        skills: survival,
+        actionRunner: runner,
+        observe: async () => ({ state: {}, frame: null }),
+    });
+    const original = w.b.placeBlock;
+    let defense;
+    w.b.placeBlock = async (...args) => {
+        await original(...args);
+        if (!defense) defense = runner.run('self_defense', async () => {}, { reflex: true });
+    };
+    const result = await tools
+        .find(t => t.name === 'place_line')
+        .execute('build', {
+            block: 'oak_planks',
+            x: 2,
+            y: -60,
+            z: 0,
+            axis: 'z',
+            count: 3,
+        });
+    await defense;
+    assert.equal(result.isError, undefined, JSON.stringify(result.details));
+    assert.equal(result.details.resumedAfterDefense, 1);
+    assert.equal(new Set(w.placed).size, 3);
+    assert.equal(w.placed.length, 3);
+    assert.equal(result.details.interruptedAttempts[0].partial.placedCount, 1);
+});
+
+test('explicit cancellation retains placement progress and never resumes', async () => {
+    const w = makeWorld(floor),
+        controller = new AbortController();
+    const original = w.b.placeBlock;
+    w.b.placeBlock = async (...args) => {
+        await original(...args);
+        controller.abort();
+    };
+    const result = await w.tools
+        .find(t => t.name === 'place_line')
+        .execute(
+            'build',
+            {
+                block: 'oak_planks',
+                x: 2,
+                y: -60,
+                z: 0,
+                axis: 'z',
+                count: 3,
+            },
+            controller.signal,
+        );
+    assert.equal(result.isError, true);
+    assert.equal(w.placed.length, 1);
+    assert.equal(result.details.facts.partial.requested, 3);
+    assert.equal(result.details.facts.partial.placedCount, 1);
+    assert.equal(result.details.resumedAfterDefense, undefined);
 });

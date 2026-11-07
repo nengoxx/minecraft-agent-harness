@@ -116,7 +116,7 @@ test('timeout retains reason and poisons finite grace for an uncooperative body'
     }
 });
 
-test('queued expired action remains prompt, does not stop predecessor, never executes', async () => {
+test('queued cancellation remains prompt, does not stop predecessor, never executes', async () => {
     const f = await fixture();
     let release;
     try {
@@ -129,16 +129,16 @@ test('queued expired action remains prompt, does not stop predecessor, never exe
         );
         await flush();
         let invoked = false;
-        await assert.rejects(
-            f.action.run(
-                'queued',
-                () => {
-                    invoked = true;
-                },
-                { timeoutMs: 10 },
-            ),
-            /deadline/,
+        const queued = new AbortController();
+        const pending = f.action.run(
+            'queued',
+            () => {
+                invoked = true;
+            },
+            { timeoutMs: 10, signal: queued.signal },
         );
+        queued.abort();
+        await assert.rejects(pending, /cancelled/);
         assert.equal(f.action.status.active, 'first');
         assert.equal(f.evidence.stops, 0);
         release();

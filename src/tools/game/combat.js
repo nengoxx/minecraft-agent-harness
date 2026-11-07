@@ -2,8 +2,161 @@ import { abortError, failWith } from './failures.js';
 import { requireFunction } from './runtime.js';
 import { integer, number } from './schema.js';
 
+// Shared by the model tool and native defense; the caller owns telemetry.
+export async function fightEntity(
+    a,
+    { bot: active, signal },
+    { pathfinderModule, perception, r2, sleepAbortable },
+    { minHealth = 0, protectTerrain = false, origin: defenseOrigin, shouldStop } = {},
+) {
+    const maxSwings = a.swings ?? (a.until_dead === false ? 1 : Infinity);
+    const chase = a.chase !== false,
+        maxDist = a.max_distance ?? 16;
+    const until = Date.now() + (a.seconds ?? 20) * 1000;
+    const start = active.entities[a.id];
+    if (!start || start.isValid === false)
+        throw failWith('not_found', `Entity ${a.id} is not here (gone, killed or despawned).`);
+    const vis = e => requireFunction(perception, 'isEntityVisible')(active, e, 24);
+    const face = async e => {
+        if (e.position.distanceTo(active.entity.position) <= 24)
+            await active.lookAt(e.position.offset(0, (e.height ?? 1.8) * 0.6, 0), true);
+    };
+    if (!vis(start)) await face(start);
+    if (!vis(start))
+        throw failWith(
+            'not_visible_or_range',
+            `Entity ${a.id} is not visible within 24 blocks; get closer or look around first.`,
+        );
+    const label = start.username ?? start.displayName ?? start.name ?? 'target';
+    const origin = defenseOrigin ?? active.entity.position.offset(0, 0, 0);
+    const { goals, Movements } = await pathfinderModule();
+    const stopPath = () => {
+        try {
+            active.pathfinder.setGoal(null);
+        } catch {}
+    };
+    signal?.addEventListener('abort', stopPath, { once: true });
+    let swings = 0,
+        landed = 0,
+        died = false,
+        lastStrike = 0,
+        lastSeen = Date.now(),
+        following = false,
+        outcome = null;
+    const onHurt = e => {
+        if (e?.id === a.id) landed++;
+    };
+    const onDead = e => {
+        if (e?.id === a.id) died = true;
+    };
+    active.on?.('entityHurt', onHurt);
+    active.on?.('entityDead', onDead);
+    active.pi_attackTargetId = a.id;
+    active.pi_attackStop = null;
+    try {
+        while (!signal?.aborted && Date.now() < until) {
+            if (minHealth && active.health <= minHealth) {
+                outcome = 'low_health';
+                break;
+            }
+            if (shouldStop?.()) {
+                outcome = 'self_preservation';
+                break;
+            }
+            if (active.pi_attackStop) {
+                outcome = active.pi_attackStop;
+                break;
+            }
+            const e = active.entities[a.id];
+            if (!e || e.isValid === false) {
+                outcome = died ? 'killed' : 'gone';
+                break;
+            }
+            if (swings >= maxSwings) {
+                outcome = 'swings';
+                break;
+            }
+            let seen = vis(e);
+            if (!seen) {
+                await face(e);
+                seen = vis(e);
+            }
+            if (seen) lastSeen = Date.now();
+            else if (Date.now() - lastSeen > 3000) {
+                outcome = 'lost_sight';
+                break;
+            }
+            if (chase && active.entity.position.distanceTo(origin) > maxDist) {
+                outcome = 'too_far';
+                break;
+            }
+            const eye = active.entity.position.offset(0, active.entity.height ?? 1.62, 0);
+            const aim = e.position.offset(0, (e.height ?? 1.8) * 0.6, 0);
+            const dist = eye.distanceTo(aim);
+            if (dist > 3.0) {
+                if (chase && !following) {
+                    const movements = new Movements(active);
+                    if (protectTerrain) {
+                        movements.canDig = false;
+                        movements.allow1by1towers = false;
+                        movements.allowParkour = false;
+                    }
+                    active.pathfinder.setMovements(movements);
+                    active.pathfinder.setGoal(new goals.GoalFollow(e, 1.5), true);
+                    following = true;
+                }
+            } else {
+                if (following) {
+                    stopPath();
+                    following = false;
+                }
+                await active.lookAt(aim, true);
+                if (Date.now() - lastStrike >= 625 && seen) {
+                    await requireFunction(active, 'attack')(e);
+                    swings++;
+                    lastStrike = Date.now();
+                }
+            }
+            await sleepAbortable(50, signal);
+        }
+    } finally {
+        stopPath();
+        signal?.removeEventListener('abort', stopPath);
+        active.removeListener?.('entityHurt', onHurt);
+        active.removeListener?.('entityDead', onDead);
+        active.pi_attackTargetId = null;
+        active.pi_attackStop = null;
+    }
+    if (signal?.aborted) throw signal.reason ?? abortError('Tool cancelled');
+    const e = active.entities[a.id];
+    const alive = e && e.isValid !== false;
+    const hp = alive ? (e.health ?? e.metadata?.[9]) : null;
+    if (died || hp === 0) outcome = 'killed';
+    const result = {
+        target: label,
+        id: a.id,
+        swings,
+        landed,
+        targetDied: died || outcome === 'killed',
+        stoppedBecause: outcome ?? 'timeout',
+        ...(alive
+            ? {
+                  distanceNow: r2(active.entity.position.distanceTo(e.position)),
+                  ...(typeof hp === 'number' ? { targetHealth: r2(hp) } : {}),
+              }
+            : {}),
+        yourHealth: active.health,
+    };
+    if (!swings && outcome !== 'gone')
+        result.note =
+            outcome === 'lost_sight'
+                ? 'never got within reach before losing sight of it'
+                : 'never got within reach (no path, it outran you, or chase=false and it stayed away)';
+    return result;
+}
+
 export function createCombat(ctx) {
-    const { add, body, pathfinderModule, perception, r2, sleepAbortable } = ctx;
+    const { add, body, pathfinderModule, r2, sleepAbortable } = ctx;
     add(
         'attack',
         'Fight a visible entity: chases it, aims and swings when in reach, respecting weapon cooldown. Stops when it dies, after `swings` swings, after `seconds` (default 20, max 60), if you lose sight of it for 3s, if chasing takes you more than `max_distance` blocks (default 16) from where you started. It never backs off on its own because of your health; call flee yourself if you want out. Hits from this target do not stop the fight; a hit from anything else, or fire/fall/drowning damage, stops it so you can decide. chase=false: hold your ground and only swing when it is in reach. Equip a weapon first for more damage.',
@@ -15,137 +168,9 @@ export function createCombat(ctx) {
             max_distance: integer(2, 64),
             until_dead: { type: 'boolean' },
         },
-        async (a, { bot: active, signal }) => {
-            const maxSwings = a.swings ?? (a.until_dead === false ? 1 : Infinity);
-            const chase = a.chase !== false,
-                maxDist = a.max_distance ?? 16;
-            const until = Date.now() + (a.seconds ?? 20) * 1000;
-            const start = active.entities[a.id];
-            if (!start || start.isValid === false)
-                throw failWith('not_found', `Entity ${a.id} is not here (gone, killed or despawned).`);
-            const vis = e => requireFunction(perception, 'isEntityVisible')(active, e, 24);
-            const face = async e => {
-                if (e.position.distanceTo(active.entity.position) <= 24)
-                    await active.lookAt(e.position.offset(0, (e.height ?? 1.8) * 0.6, 0), true);
-            };
-            if (!vis(start)) await face(start);
-            if (!vis(start))
-                throw failWith(
-                    'not_visible_or_range',
-                    `Entity ${a.id} is not visible within 24 blocks; get closer or look around first.`,
-                );
-            const label = start.username ?? start.displayName ?? start.name ?? 'target';
-            const origin = active.entity.position.offset(0, 0, 0);
-            const { goals, Movements } = await pathfinderModule();
-            const stopPath = () => {
-                try {
-                    active.pathfinder.setGoal(null);
-                } catch {}
-            };
-            signal?.addEventListener('abort', stopPath, { once: true });
-            let swings = 0,
-                landed = 0,
-                died = false,
-                lastStrike = 0,
-                lastSeen = Date.now(),
-                following = false,
-                outcome = null;
-            const onHurt = e => {
-                if (e?.id === a.id) landed++;
-            };
-            const onDead = e => {
-                if (e?.id === a.id) died = true;
-            };
-            active.on?.('entityHurt', onHurt);
-            active.on?.('entityDead', onDead);
-            active.pi_attackTargetId = a.id;
-            active.pi_attackStop = null;
-            try {
-                while (!signal?.aborted && Date.now() < until) {
-                    if (active.pi_attackStop) {
-                        outcome = active.pi_attackStop;
-                        break;
-                    }
-                    const e = active.entities[a.id];
-                    if (!e || e.isValid === false) {
-                        outcome = died || swings ? 'killed' : 'gone';
-                        break;
-                    }
-                    if (swings >= maxSwings) {
-                        outcome = 'swings';
-                        break;
-                    }
-                    let seen = vis(e);
-                    if (!seen) {
-                        await face(e);
-                        seen = vis(e);
-                    }
-                    if (seen) lastSeen = Date.now();
-                    else if (Date.now() - lastSeen > 3000) {
-                        outcome = 'lost_sight';
-                        break;
-                    }
-                    if (chase && active.entity.position.distanceTo(origin) > maxDist) {
-                        outcome = 'too_far';
-                        break;
-                    }
-                    const eye = active.entity.position.offset(0, active.entity.height ?? 1.62, 0);
-                    const aim = e.position.offset(0, (e.height ?? 1.8) * 0.6, 0);
-                    const dist = eye.distanceTo(aim);
-                    if (dist > 3.0) {
-                        if (chase && !following) {
-                            active.pathfinder.setMovements(new Movements(active));
-                            active.pathfinder.setGoal(new goals.GoalFollow(e, 1.5), true);
-                            following = true;
-                        }
-                    } else {
-                        if (following) {
-                            stopPath();
-                            following = false;
-                        }
-                        await active.lookAt(aim, true);
-                        if (Date.now() - lastStrike >= 625 && seen) {
-                            await requireFunction(active, 'attack')(e);
-                            swings++;
-                            lastStrike = Date.now();
-                        }
-                    }
-                    await sleepAbortable(50, signal);
-                }
-            } finally {
-                stopPath();
-                signal?.removeEventListener('abort', stopPath);
-                active.removeListener?.('entityHurt', onHurt);
-                active.removeListener?.('entityDead', onDead);
-                active.pi_attackTargetId = null;
-                active.pi_attackStop = null;
-            }
-            if (signal?.aborted) throw signal.reason ?? abortError('Tool cancelled');
-            const e = active.entities[a.id];
-            const alive = e && e.isValid !== false;
-            const hp = alive ? (e.health ?? e.metadata?.[9]) : null;
-            if (died || hp === 0) outcome = 'killed';
-            const result = {
-                target: label,
-                id: a.id,
-                swings,
-                landed,
-                targetDied: died || outcome === 'killed',
-                stoppedBecause: outcome ?? 'timeout',
-                ...(alive
-                    ? {
-                          distanceNow: r2(active.entity.position.distanceTo(e.position)),
-                          ...(typeof hp === 'number' ? { targetHealth: r2(hp) } : {}),
-                      }
-                    : {}),
-                yourHealth: active.health,
-            };
-            if (!swings && outcome !== 'gone')
-                result.note =
-                    outcome === 'lost_sight'
-                        ? 'never got within reach before losing sight of it'
-                        : 'never got within reach (no path, it outran you, or chase=false and it stayed away)';
-            active.emit?.('pi_tool_result', 'attack', result);
+        async (a, context) => {
+            const result = await fightEntity(a, context, ctx);
+            context.bot.emit?.('pi_tool_result', 'attack', result);
             return result;
         },
         { ...body, required: ['id'] },

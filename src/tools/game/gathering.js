@@ -379,6 +379,15 @@ export function createGathering(ctx) {
             for (let x = X0; x <= X1; x++)
                 for (let y = Y1; y >= Y0; y--) for (let z = Z0; z <= Z1; z++) todo.push({ x, y, z });
             let broke = 0;
+            const progress = inFlight =>
+                ctx.reportProgress?.({
+                    broke,
+                    byBlock: { ...byBlock },
+                    remaining: todo.length,
+                    skipped: skipped.slice(0, 12),
+                    ...(inFlight ? { inFlight } : {}),
+                });
+            progress();
             while (todo.length && Date.now() < until) {
                 if (signal?.aborted) throw abortError('break_area cancelled');
                 const me = active.entity.position,
@@ -409,6 +418,7 @@ export function createGathering(ctx) {
                     skip(`holds you up over an open drop of ${fmtDrop(hold)} blocks`);
                     continue;
                 }
+                progress(c);
                 const mark = String(active.output || '').length;
                 let r;
                 try {
@@ -437,6 +447,7 @@ export function createGathering(ctx) {
                 }
                 broke++;
                 byBlock[b.name] = (byBlock[b.name] ?? 0) + 1;
+                progress();
             }
             const unfinished = todo.filter(c => !empty(at(active, c.x, c.y, c.z)?.name)).length;
             if (broke) {

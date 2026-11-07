@@ -1,10 +1,12 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { abortError, withFailureCode } from './failures.js';
+import { abortError, failureCode, failureFacts, withFailureCode, withFailureFacts } from './failures.js';
 import { guardBuiltBlocks, installEdgeGuard, installSwimGuard } from './guards.js';
 
 const compatibility = Symbol('piSkillCompatibility');
 
 const MAX_LOG = 12000;
+
+export const REFLEX_PROTECTED_TOOLS = new Set(['attack', 'flee', 'return_to_surface']);
 
 export const LATE_MUTATION_REFUSED = 'LATE_MUTATION_REFUSED';
 
@@ -365,6 +367,9 @@ export function createActionRunner(
     let current = null;
     let fatal = null;
     let stopGeneration = 0;
+    let reflexGate = Promise.resolve();
+    let reflexPending = false;
+    let reflexHeld = false;
     const poison = error => {
         if (fatal) return;
         fatal = error;
@@ -379,12 +384,28 @@ export function createActionRunner(
     };
     return {
         get status() {
-            return { active: current?.name ?? null, blocked: Boolean(fatal) };
+            return {
+                active: current?.name ?? null,
+                origin: current?.origin ?? null,
+                blocked: Boolean(fatal),
+                reflexPending,
+                reflexHeld,
+            };
         },
         interrupt(reason) {
-            current?.controller.abort(abortError(reason || 'Interrupted: you were hit'));
+            if (current?.origin !== 'reflex')
+                current?.controller.abort(abortError(reason || 'Interrupted: you were hit'));
+        },
+        resumeReflexes() {
+            reflexHeld = false;
+        },
+        canResume(error) {
+            return (
+                error.preemptedBy === 'defense' && error.actionGeneration === stopGeneration && !reflexHeld && !fatal
+            );
         },
         async stop() {
+            reflexHeld = true;
             stopGeneration++;
             current?.controller.abort(abortError('Stopped by explicit request'));
             let timer;
@@ -405,23 +426,32 @@ export function createActionRunner(
             }
             return { stopped: !fatal, blocked: Boolean(fatal) };
         },
-        async run(name, fn, { signal, timeoutMs = defaultTimeoutMs } = {}) {
+        async run(name, fn, { signal, timeoutMs = defaultTimeoutMs, reflex = false } = {}) {
             if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > maxTimeoutMs)
                 throw new Error('Invalid action deadline.');
             if (fatal) throw fatal;
+            if (reflex && (reflexHeld || reflexPending || REFLEX_PROTECTED_TOOLS.has(current?.name)))
+                throw abortError('Automatic defense deferred');
             const generation = stopGeneration;
+            let releaseGate;
+            const previous = current?.settled ?? Promise.resolve();
+            if (reflex) {
+                reflexPending = true;
+                reflexGate = new Promise(resolve => {
+                    releaseGate = resolve;
+                });
+                current?.controller.abort(
+                    Object.assign(abortError('Interrupted by automatic defense'), {
+                        preemptedBy: 'defense',
+                        actionGeneration: generation,
+                    }),
+                );
+            }
             const controller = new AbortController();
             const forward = () => controller.abort(abortError('Action cancelled'));
             if (signal?.aborted) forward();
             else signal?.addEventListener('abort', forward, { once: true });
-            const deadline = Date.now() + timeoutMs;
-            const timer = setTimeout(
-                () =>
-                    controller.abort(
-                        withFailureCode(abortError(`Action deadline exceeded (${timeoutMs}ms)`), 'timeout'),
-                    ),
-                timeoutMs,
-            );
+            let timer;
             let rejectAbort;
             const cancelled = new Promise((_, reject) => {
                 rejectAbort = reject;
@@ -431,15 +461,29 @@ export function createActionRunner(
             controller.signal.addEventListener('abort', onAbort, { once: true });
             if (controller.signal.aborted) onAbort();
             let started = false;
-            const job = tail.then(async () => {
+            const execute = async () => {
                 if (fatal) throw fatal;
                 if (controller.signal.aborted) throw controller.signal.reason;
                 if (generation !== stopGeneration) throw abortError('Queued action cancelled by stop');
+                if (!reflex) reflexHeld = false;
                 assertSurvival(bot);
                 boundary.ensure();
                 const owner = { signal: controller.signal, active: true };
                 started = true;
-                current = { name, controller };
+                let finishAction;
+                const done = new Promise(resolve => {
+                    finishAction = resolve;
+                });
+                current = { name, controller, origin: reflex ? 'reflex' : 'tool', settled: done };
+                const deadline = Date.now() + timeoutMs;
+                timer = setTimeout(
+                    () =>
+                        controller.abort(
+                            withFailureCode(abortError(`Action deadline exceeded (${timeoutMs}ms)`), 'timeout'),
+                        ),
+                    timeoutMs,
+                );
+                let progress;
                 bot.interrupt_code = false;
                 let stopping;
                 const stop = () => {
@@ -450,7 +494,14 @@ export function createActionRunner(
                 const work = Promise.resolve().then(() => {
                     if (controller.signal.aborted) throw controller.signal.reason;
                     return boundary.context.run(owner, () =>
-                        fn({ bot: actionBot(bot, controller.signal), signal: controller.signal, deadline }),
+                        fn({
+                            bot: actionBot(bot, controller.signal),
+                            signal: controller.signal,
+                            deadline,
+                            reportProgress: value => {
+                                progress = value;
+                            },
+                        }),
                     );
                 });
                 let outcome,
@@ -484,15 +535,52 @@ export function createActionRunner(
                     poison(new Error(`Action ${name} or its stop did not settle safely; reconnect required.`));
                 controller.signal.removeEventListener('abort', stop);
                 current = null;
+                finishAction();
                 if (fatal) throw fatal;
-                if (Object.hasOwn(outcome, 'error')) throw outcome.error;
+                if (Object.hasOwn(outcome, 'error')) {
+                    if (progress !== undefined) {
+                        const original = outcome.error;
+                        const error = Object.assign(new Error(original.message), {
+                            name: original.name,
+                            preemptedBy: original.preemptedBy,
+                            actionGeneration: original.actionGeneration,
+                        });
+                        withFailureCode(error, failureCode(original));
+                        throw withFailureFacts(error, { ...failureFacts.get(original), partial: progress });
+                    }
+                    throw outcome.error;
+                }
                 return outcome.value;
+            };
+            const job = (reflex ? previous : tail).then(async () => {
+                if (!reflex) {
+                    // Recheck after awaiting: a reflex may have installed a newer gate.
+                    for (;;) {
+                        const gate = reflexGate;
+                        await gate;
+                        if (gate === reflexGate) break;
+                    }
+                }
+                return execute();
             });
-            tail = job.catch(() => {});
+            if (reflex) {
+                const release = () => {
+                    reflexPending = false;
+                    releaseGate();
+                };
+                job.then(release, release);
+            } else tail = job.catch(() => {});
             try {
                 return await Promise.race([job, cancelled]);
             } catch (error) {
-                if (started) await job.catch(() => {});
+                if (started) {
+                    try {
+                        return await job;
+                    } catch (settledError) {
+                        // Cancellation must wait for cleanup and retain the action's progress.
+                        if (failureFacts.has(settledError) || settledError !== fatal) throw settledError;
+                    }
+                }
                 throw error;
             } finally {
                 clearTimeout(timer);

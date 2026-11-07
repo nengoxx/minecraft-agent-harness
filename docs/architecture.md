@@ -78,55 +78,73 @@ guards), `observation.js`, `schema.js` (argument schemas and validation) and `fa
 keeps the tools in a fixed order, and `test/tools/tool-definitions.test.js` checks every tool name, description and
 schema against a committed snapshot, so moving code between files cannot change what the model sees.
 
-## Automatic defense integration decision (proposed, not implemented)
+## Automatic defense
 
-The harness is standalone but already derives `src/skills/` and `src/body/bot.js`
-from Mindcraft; see THIRD_PARTY_NOTICES.md. It does not run Mindcraft's agent,
-prompt manager, action manager or modes scheduler. Pi provides session/tool
-orchestration and persistence; it does not supply a verified Minecraft planner.
+`--auto-defense` (default off) enables `src/body/defense.js` alongside the Pi
+session. Its 300 ms local loop continues while the model reasons or waits.
+There is one Mineflayer bot and one body-action owner; no second model loop,
+container, modes registry or dependency was introduced.
 
-The recommended direction is to keep this harness and adapt Mindcraft's reflex
-defense behavior to its existing action runner. Reuse existing combat/movement
-mechanics; do not introduce a second body controller or a second model loop.
+The harness already derives `src/skills/` and `src/body/bot.js` from Mindcraft;
+see THIRD_PARTY_NOTICES.md. Defense reuses its weapon-selection helper and the
+existing bounded combat routine shared with `attack`. Mindcraft's native-loop,
+actual-attacker and close-flying-threat behavior informed the policy. Its whole
+modes/action/self-prompter stack is not imported.
 
-| Approach                                           | Assessment                                                                                                                        |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Flip a Mineflayer/PvP option                       | Insufficient: the plugin executes combat, but application code must choose targets, arbitrate actions and preserve work.          |
-| Import Mindcraft's modes controller unchanged      | Coupled to its action manager, self-prompter, history, conversation routing and profile initialization. Not a standalone plugin.  |
-| Put this harness over the entire Mindcraft agent   | Requires replacing or coordinating two schedulers, message flows and interruption systems; larger scope than the observed defect. |
-| Adapt defense into the existing harness body layer | Recommended: retain one Pi session, one Mineflayer bot and one owner of physical actions.                                         |
+- The action runner has one priority gate. Defense cancels conflicting work,
+  waits for its complete cleanup, then owns the body. Queued model tools wait;
+  their execution deadlines start when they actually begin. Ordinary hit/DM
+  interrupts cannot abort the reflex. Model-selected `attack`, `flee` and
+  `return_to_surface` retain
+  control. Explicit stop cancels queued work and holds defense until new valid
+  body work or respawn; old interrupted calls cannot revive after stop.
+- Each encounter reuses `fightEntity`: up to eight targets within ten seconds,
+  at most four seconds per target and a twelve-second action deadline. All
+  targets share a four-block pursuit limit from the encounter's starting point,
+  with no digging/towering/parkour. Flying threats must be within three
+  blocks and are not chased. Players are never automatic targets. Passive and
+  neutral mobs are not attacked proactively; real attackers are remembered.
+  Creepers are left to the model. Unreachable or timed-out targets back off for thirty
+  seconds, with a one-second gap between engagements to avoid monopolizing work.
+- Defense yields at health eight or below, low oxygen, lava or burning.
+  Environmental damage and threats
+  outside its scope retain the existing model wake path. Automatic low-health
+  escape and shield-specific tactics are not implemented in this first slice.
+  Sleeping, death, explicit stop and shutdown inhibit reflex activity.
+- Routine handled hits retain raw telemetry but do not repeatedly restart model
+  inference or flood tool results. `defense_start`/`defense_end`, a coalesced
+  event and `automaticDefense` in observations distinguish reflexes from Qwen's
+  actions. The shared combat helper does not label reflex actions as model tools.
+- `place_line` and `break_area` checkpoint partial work through the existing
+  failure-facts channel, including an uncertain in-flight cell where applicable.
+  Cancelled tools report observed inventory changes and position. Placement and
+  `go_to` can retry at most twice after defense, checking current world state;
+  prior attempts remain in the result. Explicit cancellation never retries.
+  Interrupted scaffolding reports its remaining blocks and prevents automatic
+  replay, so Qwen can inspect and recover without losing track of temporary blocks.
+  Crafting, gathering, smelting, containers and whole shell scripts are not
+  automatically replayed. Qwen retains the task and decides their remaining work.
 
-Required behavior:
+Pi provides orchestration and persistence, not a verified Minecraft planner.
+Qwen still chooses the site, structure, resources and sequence. Native defense
+is assessed separately from house completion, which remains a live-test question.
 
-- A local event/timer loop remains active during model inference, model waits and
-  reasoning. Ordinary defense must not cancel or restart inference on every hit.
-  Mindcraft's update loop currently checks modes roughly every 300 ms; it does
-  not need a model response for each attack.
-- Reuse the bounded combat implementation in `src/tools/game/combat.js` through
-  the action runner. Evaluate any imported Mindcraft helper against its existing
-  cancellation and packet-ownership boundary. Its old unbounded `defendSelf` loop
-  and broad `isHostile` classification must not be switched on unchanged.
-- Keep physical actions exclusive. Defense takes priority over conflicting
-  work, waits for cancellation to settle, then returns control. A pending Qwen
-  tool must not reset combat's pathfinder. Explicit stop/death/disconnect cancels
-  both normal actions and reflex work. Avoid unlimited pursuit or combat loops.
-- Preserve the original task. Resume a safely checkpointed operation; otherwise
-  return observed partial results for Qwen to decide the remaining work. This is
-  not automatic replay of crafting, a shell script or an entire build batch.
-  In particular, `place_line` currently throws on abort before returning its
-  accumulated summary. Interruption reporting needs correction before promising
-  reliable automatic continuation of such batches.
-- Record every reflex event with its origin separate from Qwen's tool decisions.
-  Aggregate routine encounters into a concise model update. Unresolved threats
-  and critical danger still reach Qwen; fresh state must reflect defense movement
-  before subsequent actions execute.
+### Other Mindcraft behavior considered
 
-Qualify with a delayed synthetic model response plus native-controller tests:
-defense must start while inference is pending, handle repeated hits without
-parallel body writers, preserve partial work and honor stop. Then test live
-defense and task continuation before another house trial. Qwen still selects
-the site, structure, resources and plan; no operator construction routine is added.
-No extra container, Pi installation or inference request is needed for reflexes.
+| Behavior                                      | Decision                                                                                                                    |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Swimming/drowning and fall protection         | Keep the existing harness swim/edge guards and oxygen wakes; avoid duplicate controllers.                                   |
+| Getting unstuck                               | Keep existing movement stall/progress watchers; Mindcraft's generic stationary timer also interrupted combat in prior logs. |
+| Collecting drops                              | Reuse current gathering/clearing pickup behavior; avoid unrelated idle detours.                                             |
+| Low-health/fire escape                        | Useful follow-up using existing flee mechanics after defense qualification; not silently claimed implemented.               |
+| Torch placement                               | Candidate once gathering/building works; consumes resources and needs task-aware choices.                                   |
+| Hunting, idle staring and elbow-room movement | Leave out: unnecessary autonomous movement/targets can compete with the requested task.                                     |
+| Catalog construction                          | Separate possible tool improvement; do not replace this Qwen-led planning trial with a prewritten house routine.            |
+
+Opus reviewed the design and implementation via the installed Claude CLI, with
+read-only tools. Local review evidence is under
+`.agent-state/evaluation/defense-review/`; see ISSUES/EVALUATION for outcomes and
+qualification limits.
 
 ## The sandbox
 

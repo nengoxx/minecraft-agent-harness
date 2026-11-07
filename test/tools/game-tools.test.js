@@ -223,7 +223,7 @@ test('deadline on uncooperative action disconnects and permanently blocks bodies
     );
 });
 
-test('already aborted or timed-out queued work never runs and does not stop current body', async () => {
+test('already aborted or explicitly cancelled queued work never runs and does not stop current body', async () => {
     const b = installSkillCompatibility(bot());
     const runner = createActionRunner(b);
     const controller = new AbortController();
@@ -250,14 +250,16 @@ test('already aborted or timed-out queued work never runs and does not stop curr
             }),
     );
     await delay(2);
+    const queuedController = new AbortController();
     const second = runner.run(
-        'expired',
+        'cancelled',
         () => {
             invoked = true;
         },
-        { timeoutMs: 5 },
+        { signal: queuedController.signal, timeoutMs: 5 },
     );
-    await assert.rejects(second, /deadline/);
+    queuedController.abort();
+    await assert.rejects(second, /cancelled/);
     assert.deepEqual(b.calls, []);
     release();
     await first;
@@ -652,7 +654,8 @@ test('combat uses direct attack only, with LOS and ordinary reach', async () => 
     assert.equal((await run('attack', { id: 2 })).isError, true);
     assert.equal((await run('attack', { id: 1, swings: 1 })).details.result.swings, 1);
     const fight = (await run('attack', { id: 1 })).details.result;
-    assert.equal(fight.stoppedBecause, 'killed');
+    assert.equal(fight.stoppedBecause, 'gone');
+    assert.equal(fight.targetDied, false);
     assert.equal(fight.swings, 1);
     assert.deepEqual(hits, [1, 1]);
 });

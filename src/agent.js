@@ -1,6 +1,7 @@
+import { installDefense } from './body/defense.js';
 import { installRespawn } from './body/respawn.js';
 import { once } from 'node:events';
-import { installDamageTypes, causeLabel, formatHitAlert } from './body/hurt-cause.js';
+import { installDamageTypes, causeLabel, formatHitAlert, combatStopReason } from './body/hurt-cause.js';
 import { installDifficulty, currentDifficulty } from './body/difficulty.js';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { readFile, unlink } from 'node:fs/promises';
@@ -80,6 +81,7 @@ export async function startAgent(settings, options = {}) {
             { mode: 0o600 },
         );
     let runner,
+        defense,
         camera,
         mailbox,
         closing = false,
@@ -140,6 +142,7 @@ export async function startAgent(settings, options = {}) {
         timers.forEach(clearTimeout);
         const hardStop = setTimeout(() => process.exit(0), 10000);
         try {
+            await defense?.close();
             await actionRunner.stop();
             await runner?.close();
             await camera?.close();
@@ -328,7 +331,21 @@ export async function startAgent(settings, options = {}) {
                 }, 2000),
             );
         let lowOxygen = false;
-        installDamageWake(bot, () => runner, actionRunner);
+        if (options.autoDefense)
+            defense = installDefense({
+                bot,
+                runner: actionRunner,
+                perception,
+                record,
+                onOutcome: result =>
+                    runner?.enqueue({ kind: 'defense', ...result }, { key: 'defense', interrupt: false }),
+            });
+        installDamageWake(
+            bot,
+            () => runner,
+            actionRunner,
+            () => defense?.handlesDamage() ?? false,
+        );
         const hurtLog = [];
         bot.on('death', () => {
             for (const ev of hurtLog) ev.shown = true;
@@ -340,6 +357,7 @@ export async function startAgent(settings, options = {}) {
             if (entity !== bot.entity) return;
             const p = bot.entity.position,
                 s = source?.position;
+            const handled = defense?.handleHit(source) ?? false;
             const cause = bot.pi_lastDamageType ?? null;
             bot.pi_lastDamageType = null;
             const ev = {
@@ -347,7 +365,7 @@ export async function startAgent(settings, options = {}) {
                 by: source ? (source.username ?? source.displayName ?? source.name ?? 'unknown') : causeLabel(cause),
                 id: source?.id ?? null,
                 kind: source?.type ?? null,
-                shown: false,
+                shown: handled,
                 at: s ? { x: Math.round(s.x), y: Math.round(s.y), z: Math.round(s.z) } : null,
                 offset:
                     s && p
@@ -375,27 +393,28 @@ export async function startAgent(settings, options = {}) {
             const who = source
                 ? `${ev.by} (entity id ${ev.id}${ev.at ? `, at ${ev.at.x},${ev.at.y},${ev.at.z}` : ''}${ev.offset ? `, ${ev.offset.distance} blocks away` : ''})`
                 : ev.by;
-            if (source)
+            if (source && !handled)
                 runner?.enqueue(
                     { kind: 'hit', by: ev.by, id: ev.id, at: ev.at, health: bot.health },
                     { key: 'hit', urgent: true, interrupt: false, restart: true },
                 );
             const act = String(actionRunner.status.active ?? '');
-            if (act === 'attack') {
-                if (!source && cause !== 'starve') bot.pi_attackStop = 'environment_damage';
-                else if (source.id !== bot.pi_attackTargetId) bot.pi_attackStop = `hit_by_other: ${who}`;
-            } else if (interruptsOnHit(act, Boolean(source)))
+            const combatStop = combatStopReason(act, source, cause, bot.pi_attackTargetId);
+            if (combatStop) bot.pi_attackStop = combatStop;
+            else if (!handled && interruptsOnHit(act, Boolean(source)))
                 actionRunner.interrupt(`Interrupted: you were hit by ${who}`);
-            bot.emit('pi_hit', {
-                by: ev.by,
-                id: ev.id,
-                distance: ev.offset?.distance ?? null,
-                health: Math.round(bot.health),
-            });
+            if (!handled)
+                bot.emit('pi_hit', {
+                    by: ev.by,
+                    id: ev.id,
+                    distance: ev.offset?.distance ?? null,
+                    health: Math.round(bot.health),
+                });
         });
         bot.on('pi_tool_result', (tool, result) => record('tool_result', { tool, result }));
         bot.on('breath', () => {
             const low = bot.oxygenLevel < 10;
+            if (low && actionRunner.status.origin === 'reflex') bot.pi_attackStop = 'low_oxygen';
             if (low && !lowOxygen)
                 runner?.enqueue(
                     { kind: 'low_oxygen', oxygen: bot.oxygenLevel },
@@ -456,7 +475,11 @@ export async function startAgent(settings, options = {}) {
         const observe = async options => {
             const current = await observeWorld(options);
             const alert = hitAlert();
-            const state = { ...(alert ? { alert } : {}), ...current.state };
+            const state = {
+                ...(alert ? { alert } : {}),
+                ...current.state,
+                ...(defense ? { automaticDefense: defense.snapshot() } : {}),
+            };
             if (team) {
                 delete state.recentPublicChat;
                 if (typeof state.messaging === 'string') state.messaging = state.messaging.split(';')[0] + '.';
@@ -611,6 +634,7 @@ export async function startAgent(settings, options = {}) {
             sharedMachine: tools.some(t => t.name === 'shared_exec'),
             sharedPath: options.sharedMachinePath ?? '/shared',
             canFly: !bot.pi_no_flight,
+            autoDefense: Boolean(defense),
         });
         runner = await createMinecraftSession({
             agentId: name,

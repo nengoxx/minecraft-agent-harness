@@ -132,7 +132,7 @@ confirms the explicit field. Task-level success remains to be evaluated.
 Evidence: `.agent-state/evaluation/T04-exact-prompt/` (raw requests/SSE, exact
 wire-versus-Pi comparison, budget replay) and `T05-explicit-budget/`.
 
-## H07 — No automatic defense controller (confirmed; not yet implemented)
+## H07 — No automatic defense controller (implemented; live qualification pending)
 
 Mindcraft's `src/agent/modes.js` has a tick-driven `self_defense` mode that calls
 `skills.defendSelf`, arbitrates against other actions, and resumes or reprompts
@@ -167,3 +167,12 @@ Do not transplant Mindcraft's entire modes system or simply enable the PvP
 plugin alongside current movement. Both need exclusive control of the body;
 the copied `isHostile` helper also classifies most `mob` entities broadly. Pi's
 request/planning extensions do not replace a native real-time controller.
+
+Implementation update: optional `--auto-defense` reuses the existing bounded
+combat routine and Mindcraft-derived weapon selection under one runner priority
+gate. It suppresses handled hit restarts, records reflex origins, preserves batch
+checkpoints, limits safe retries and holds after explicit stop. Native deadlines
+now measure execution, not time waiting for another action. Synthetic checks
+cover concurrent inference, arbitration, cancellation, bounded targets and
+placement continuation. See architecture.md for the exact policy and remaining
+limits; this does not yet establish successful shelter construction.
