@@ -75,8 +75,17 @@ proxy, use explicit connection arguments, for example:
 bash scripts/local-harness.sh run \
   --host 127.0.0.1 --port 25568 --mc-version 26.1 --name amaia \
   --objective 'Help the player with tasks requested in chat.' \
-  --duration 12 --no-reconnect
+  --no-reconnect
 ```
+
+This starts without a whole-process time limit. Stop with Ctrl+C, or explicitly
+add `--duration MINUTES` when a bounded test is intended. T05's 15-minute stop was
+an operator-selected launch flag, not a default turn limit or a daylight trigger.
+For continuing task evaluation, record timed checkpoints without disconnecting
+solely because a checkpoint is reached. Individual action deadlines still apply;
+the model scheduler's 30-minute cycle watchdog schedules another cycle instead
+of ending the process. No automatic defense is enabled yet; see the proposed
+integration in [architecture](architecture.md#automatic-defense-integration-decision-proposed-not-implemented).
 
 The current local server is 26.3, reached through a separate ViaProxy 3.4.14
 process using client protocol 26.1. This launcher does not start or reconfigure

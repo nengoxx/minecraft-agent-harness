@@ -127,6 +127,13 @@ completion report. The partial build remains around x=-2359..-2360, y=112,
 z=-229..-223. Additional native preparation digging occurred during placement;
 the complete telemetry contains 36 digging events, not only the clearing batch.
 
+The deadline was chosen by the operator at launch, not a default turn limit,
+daylight event or model-declared completion. It cut off continued daytime work.
+Treat this as incomplete at the observation cutoff, not proof Qwen could never
+finish. Future continuing evaluations should record time checkpoints without
+automatically disconnecting at those checkpoints; report any intervention and
+stop reason explicitly.
+
 All 14 captured requests carry the explicit 2048 budget. There were 270 hurt
 events, including 266 attributed to mobs, with health/food remaining 20. Ari
 confirmed invincibility; this is not a survival qualification. Two SDK validation

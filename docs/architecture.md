@@ -78,6 +78,56 @@ guards), `observation.js`, `schema.js` (argument schemas and validation) and `fa
 keeps the tools in a fixed order, and `test/tools/tool-definitions.test.js` checks every tool name, description and
 schema against a committed snapshot, so moving code between files cannot change what the model sees.
 
+## Automatic defense integration decision (proposed, not implemented)
+
+The harness is standalone but already derives `src/skills/` and `src/body/bot.js`
+from Mindcraft; see THIRD_PARTY_NOTICES.md. It does not run Mindcraft's agent,
+prompt manager, action manager or modes scheduler. Pi provides session/tool
+orchestration and persistence; it does not supply a verified Minecraft planner.
+
+The recommended direction is to keep this harness and adapt Mindcraft's reflex
+defense behavior to its existing action runner. Reuse existing combat/movement
+mechanics; do not introduce a second body controller or a second model loop.
+
+| Approach                                           | Assessment                                                                                                                        |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Flip a Mineflayer/PvP option                       | Insufficient: the plugin executes combat, but application code must choose targets, arbitrate actions and preserve work.          |
+| Import Mindcraft's modes controller unchanged      | Coupled to its action manager, self-prompter, history, conversation routing and profile initialization. Not a standalone plugin.  |
+| Put this harness over the entire Mindcraft agent   | Requires replacing or coordinating two schedulers, message flows and interruption systems; larger scope than the observed defect. |
+| Adapt defense into the existing harness body layer | Recommended: retain one Pi session, one Mineflayer bot and one owner of physical actions.                                         |
+
+Required behavior:
+
+- A local event/timer loop remains active during model inference, model waits and
+  reasoning. Ordinary defense must not cancel or restart inference on every hit.
+  Mindcraft's update loop currently checks modes roughly every 300 ms; it does
+  not need a model response for each attack.
+- Reuse the bounded combat implementation in `src/tools/game/combat.js` through
+  the action runner. Evaluate any imported Mindcraft helper against its existing
+  cancellation and packet-ownership boundary. Its old unbounded `defendSelf` loop
+  and broad `isHostile` classification must not be switched on unchanged.
+- Keep physical actions exclusive. Defense takes priority over conflicting
+  work, waits for cancellation to settle, then returns control. A pending Qwen
+  tool must not reset combat's pathfinder. Explicit stop/death/disconnect cancels
+  both normal actions and reflex work. Avoid unlimited pursuit or combat loops.
+- Preserve the original task. Resume a safely checkpointed operation; otherwise
+  return observed partial results for Qwen to decide the remaining work. This is
+  not automatic replay of crafting, a shell script or an entire build batch.
+  In particular, `place_line` currently throws on abort before returning its
+  accumulated summary. Interruption reporting needs correction before promising
+  reliable automatic continuation of such batches.
+- Record every reflex event with its origin separate from Qwen's tool decisions.
+  Aggregate routine encounters into a concise model update. Unresolved threats
+  and critical danger still reach Qwen; fresh state must reflect defense movement
+  before subsequent actions execute.
+
+Qualify with a delayed synthetic model response plus native-controller tests:
+defense must start while inference is pending, handle repeated hits without
+parallel body writers, preserve partial work and honor stop. Then test live
+defense and task continuation before another house trial. Qwen still selects
+the site, structure, resources and plan; no operator construction routine is added.
+No extra container, Pi installation or inference request is needed for reflexes.
+
 ## The sandbox
 
 `run_shell` executes commands in a per-agent persistent machine (`src/sandbox/shell-sandbox.js`, `src/sandbox/docker.js`):
