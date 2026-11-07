@@ -239,3 +239,19 @@ provisioning or mid-task coaching was supplied. The native equipment correction
 has useful live evidence, but this run does not establish better house capability
 than Mindcraft. Evidence: `.agent-state/evaluation/T08-weapon-coordination/`.
 Agent, proxy, wire relay and reused container stopped; direct model URL restored.
+
+## T09 — Launch failed; project paused
+
+Source 3610281 includes explicit collection/full-inventory feedback and grounded
+return verification. Full validation passed: 365 tests, lint and formatting.
+These corrections were not live-qualified. At 21:31:58 UTC on 2026-11-07, the
+connection reset before spawn and the agent exited 75. No task was delivered and
+no inference or gameplay trial began. The connection failure was not diagnosed.
+
+Ari explicitly paused this project to revisit Mindcraft in a clean session. No
+retry was attempted. Agent, proxy and passive relay are stopped; the one reused
+Docker shell container is stopped. Direct backend configuration was restored and
+global Pi hashes still match the pre-session baseline. Evidence is archived at
+`.agent-state/evaluation/T09-capacity-return/`; the clean operational handoff is
+local and intentionally untracked. Neither house capability nor live switching
+from scaffold blocks back to the sword is qualified by these runs.
