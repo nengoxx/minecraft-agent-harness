@@ -213,3 +213,53 @@ return or another pursuit. Tests use the actual installed PvP plugin to verify
 attacks during ownership, no swing after cancellation during aiming, prompt
 entityGone settlement and preservation of unrelated path-stop listeners.
 No dependency patch or second movement controller was needed.
+
+## H10 — Combat kept the scaffold block equipped (T07 integration regression)
+
+T07 (ebd395f) moved, scaffolded and returned, but Ari observed swings with dirt.
+Mindcraft's `defendSelf` re-equips on each loop; our adapter only equipped once.
+This was an incomplete adaptation, not a Qwen planning or Pi issue. Simply
+copying the timer also races pathfinder's equipment and placement operations.
+Its `isBuilding` flag can clear on a path reset while a placement is in flight.
+
+The correction reuses the weapon helper when placement/mining is idle and the
+held item has changed. Encounter-local equipment/placement tracking survives path resets. The helper
+returns its selected weapon so a competing hand change cannot redefine it as dirt.
+A small optional PvP readiness hook checks before aiming and again before the
+actual swing, including its delayed shield/aim queue. Deferred swings retry on
+the next tick. Pursuit, cooldowns and shield mechanics remain in the PvP plugin.
+Hooks restore their original descriptors, not action-bound proxy functions, and
+pending placements settle before controller handoff. Regression tests exercise
+actual PvP, delayed aim, reset during placement, restoration and cancellation.
+
+## H11 — Fake scaffold state corrupted placement acknowledgements and limits
+
+The retained pathfinder patch wrote fake stone into the local destination before
+sending placement. Mineflayer's native acknowledgement logic then mistook a
+server refusal returning air for a successful stone-to-air change. T07 emitted
+63 air placement events. One encounter spent 17 net dirt while reporting only
+eight placements; the whole run consumed the starting 27 dirt. These events are
+not reliable world-edit counts, and the previous cap was not enforced correctly.
+
+Remove the fake write and keep native server-confirmed placement. Actual plugin
+regressions distinguish accepted dirt from refused air. Each encounter reserves
+capacity for in-flight placements before calling Mineflayer, so stale paths
+cannot overspend the eight-block limit. Unacknowledged attempts retain capacity
+and are reported as uncertain; only an explicit server refusal refunds capacity. The existing Movements count hook also
+restricts path search. Reports include confirmed cells and net dirt spent; these
+can differ when return digging recovers dirt. No world blocks are secretly erased.
+
+## H12 — Departing engaged targets were reported cleared
+
+T07 sometimes returned while a tracked phantom was still alive but outside the
+selection radius. With no explicit stop reason, the old summary called this
+cleared and allowed an automatic retry. Outcomes now retain unconfirmed targets
+as disengaged/lost/timeout and report unresolved danger. Only confirmed deaths
+count as kills. Conservative retry veto does not prevent a new model-selected
+body action. This avoids silently treating loss of view as combat success.
+
+T07 correction validation: clean `npm ci` applied all seven patches; 361 tests,
+lint and formatting passed. Actual Opus reviewed the incremental changes and
+found no concrete blockers. Its final synchronous-abort note was addressed by
+keeping cancellation inside the tracked Promise, preserving native async APIs.
+Live qualification is separate and pending T08.

@@ -9,7 +9,7 @@ const counts = bot => {
 };
 
 // Mindcraft's PvP/pathfinder plugins own pursuit, climbing, cooldowns and shields.
-// This wrapper owns only encounter limits, reporting and the trip back to work.
+// This wrapper coordinates equipment, encounter limits and the trip back to work.
 export async function defendArea(
     { bot, signal, ownTicks, deadline, reportProgress = () => {} },
     {
@@ -31,7 +31,43 @@ export async function defendArea(
         { Movements, goals } = module.default ?? module;
     const inventoryBefore = counts(bot),
         stats = new Map(),
-        scaffold = [];
+        scaffold = [],
+        uncertain = [],
+        placements = new Set(),
+        equipment = new Set();
+    let equipping = false,
+        weaponType;
+    // isBuilding alone becomes false when pathfinder resets a path, even if
+    // its last placement is still awaiting the server. Keep those calls busy.
+    const busy = () =>
+        equipment.size > 0 || placements.size > 0 || bot.pathfinder.isBuilding?.() || bot.pathfinder.isMining?.();
+    const track = (pending, operation) => {
+        const job = Promise.resolve()
+            .then(() => {
+                signal.throwIfAborted();
+                return operation();
+            })
+            .finally(() => pending.delete(job));
+        pending.add(job);
+        return job;
+    };
+    const drain = async () => {
+        // An equip completion can start a placement. Keep draining until both
+        // settle, including work that pathfinder's reset flags no longer expose.
+        while (equipment.size || placements.size) await Promise.allSettled([...equipment, ...placements]);
+    };
+    const remaining = () => Math.max(0, 8 - scaffold.length - uncertain.length - placements.size);
+    const equipWeapon = async () => {
+        equipping = true;
+        try {
+            const weapon = await equip(bot);
+            // Record the selected weapon, not a hand another plugin may have
+            // changed while the inventory operation awaited acknowledgement.
+            weaponType = weapon?.type;
+        } finally {
+            equipping = false;
+        }
+    };
     const dirt = bot.registry.itemsByName.dirt.id;
     const pursuit = new Movements(bot),
         returning = new Movements(bot);
@@ -40,10 +76,45 @@ export async function defendArea(
     for (const movement of [pursuit, returning]) {
         movement.scafoldingBlocks = [dirt];
         movement.allow1by1towers = (inventoryBefore.dirt ?? 0) > 0;
-        movement.exclusionAreasPlace.push(block =>
-            scaffold.length >= 8 || block.position?.distanceTo(origin) > 16 ? 100 : 0,
-        );
+        movement.exclusionAreasPlace.push(block => (block.position?.distanceTo(origin) > 16 ? 100 : 0));
+        const count = movement.countScaffoldingItems;
+        movement.countScaffoldingItems = () => Math.min(count.call(movement), remaining());
     }
+    // Save descriptors, not actionBot's signal-bound method wrappers: those
+    // wrappers must never escape this encounter into a later action.
+    const placeDescriptor = Object.getOwnPropertyDescriptor(bot, 'placeBlock');
+    const equipDescriptor = Object.getOwnPropertyDescriptor(bot, 'equip');
+    const attackDescriptor = Object.getOwnPropertyDescriptor(bot.pvp, 'canAttack');
+    const restoreHooks = () => {
+        if (placeDescriptor) Object.defineProperty(bot, 'placeBlock', placeDescriptor);
+        else delete bot.placeBlock;
+        Object.defineProperty(bot, 'equip', equipDescriptor);
+        if (attackDescriptor) Object.defineProperty(bot.pvp, 'canAttack', attackDescriptor);
+        else delete bot.pvp.canAttack;
+    };
+    bot.placeBlock = function (...args) {
+        // Reserve before starting: even a stale path or a concurrent reset
+        // cannot spend a ninth block. Fail through pathfinder's normal replan.
+        if (!remaining()) return Promise.reject(new Error('Defense scaffold limit reached'));
+        return track(placements, async () => {
+            try {
+                return await placeDescriptor.value.apply(this, args);
+            } catch (error) {
+                // Only an explicit server refusal proves no block was placed.
+                // A timeout may still land later; do not refund that capacity.
+                if (!String(error.message).startsWith('Server refused to place')) {
+                    const at = args[0]?.position?.plus(args[1]);
+                    uncertain.push({ ...(at ? position(at) : {}), reason: String(error.message) });
+                }
+                throw error;
+            }
+        });
+    };
+    bot.equip = function (...args) {
+        return track(equipment, () => equipDescriptor.value.apply(this, args));
+    };
+    bot.pvp.canAttack = () =>
+        !signal.aborted && !equipping && !busy() && (weaponType === undefined || bot.heldItem?.type === weaponType);
     const priorMovements = bot.pvp.movements;
     bot.pvp.movements = pursuit;
     // GoalNear floors coordinates. A radius below one keeps its destination on
@@ -93,12 +164,6 @@ export async function defendArea(
     };
     const onPlace = (_old, block) => {
         if (block?.name === 'dirt') scaffold.push({ ...position(block.position), block: block.name });
-        if (scaffold.length === 8 && !signal.aborted) {
-            pursuit.scafoldingBlocks = [];
-            returning.scafoldingBlocks = [];
-            pursuit.allow1by1towers = returning.allow1by1towers = false;
-            bot.pathfinder.setMovements(phase === 'return' ? returning : pursuit);
-        }
     };
     const onPath = result => {
         if (result.status === 'noPath') pendingStop = 'no_path';
@@ -111,16 +176,31 @@ export async function defendArea(
             if (delta) inventoryDelta[name] = delta;
         }
         const targets = [...stats.values()];
-        for (const target of targets) if (target.targetDied) target.stoppedBecause = 'killed';
-        const unresolved =
-            Boolean(choose(null)) ||
-            targets.some(t => t.stoppedBecause && t.stoppedBecause !== 'killed' && bot.entities[t.id]);
+        for (const target of targets) {
+            if (target.targetDied) target.stoppedBecause = 'killed';
+            else
+                target.stoppedBecause ??= bot.entities[target.id]
+                    ? now() >= fightUntil
+                        ? 'combat_timeout'
+                        : 'disengaged'
+                    : 'lost';
+        }
+        // Leaving view/range is not a confirmed kill. Preserve that uncertainty
+        // instead of silently resuming an interrupted edit as though we cleared it.
+        const unresolved = Boolean(choose(null)) || targets.some(t => !t.targetDied);
         return {
             origin: position(origin),
             stoppedAt: position(bot.entity.position),
             returned,
-            resumeAllowed: returned && ready() && !unresolved && reason === 'cleared',
-            reason,
+            resumeAllowed: returned && ready() && !unresolved && !uncertain.length && reason === 'cleared',
+            reason:
+                reason !== 'cleared'
+                    ? reason
+                    : unresolved
+                      ? 'threats_unresolved'
+                      : uncertain.length
+                        ? 'placement_uncertain'
+                        : reason,
             unresolved,
             distanceFromOrigin: bot.entity.position.distanceTo(origin),
             targets,
@@ -128,6 +208,8 @@ export async function defendArea(
             inventoryDelta,
             scaffold: {
                 placed: scaffold,
+                uncertain,
+                netDirtSpent: -(inventoryDelta.dirt ?? 0),
                 left: scaffold.filter(
                     p => bot.blockAt(origin.offset(p.x - origin.x, p.y - origin.y, p.z - origin.z))?.name === p.block,
                 ),
@@ -145,7 +227,7 @@ export async function defendArea(
     for (const [event, listener] of Object.entries(listeners)) bot.on(event, listener);
     bot.pi_attackStop = null;
     try {
-        await equip(bot);
+        await equipWeapon();
         while (!signal.aborted && now() < end) {
             if (!ready() || bot.pi_attackStop) {
                 reason = bot.pi_attackStop ?? 'self_preservation';
@@ -157,8 +239,13 @@ export async function defendArea(
             }
             const next = now() < fightUntil ? choose(current) : null;
             if (next && bot.entity.position.distanceTo(origin) <= 16) {
+                // Mindcraft restores its weapon throughout combat. Wait until
+                // pathfinder has finished using the hand, then reuse its helper.
+                if (!busy() && weaponType !== undefined && bot.heldItem?.type !== weaponType) await equipWeapon();
                 if (next.id !== current?.id || phase !== 'combat') {
                     stopPvp();
+                    await drain();
+                    signal.throwIfAborted();
                     if (phase !== 'combat') onPhase('combat');
                     phase = 'combat';
                     current = next;
@@ -193,6 +280,8 @@ export async function defendArea(
                 }
                 if (phase !== 'return') {
                     stopPvp();
+                    await drain();
+                    signal.throwIfAborted();
                     phase = 'return';
                     onPhase(phase);
                     pendingStop = null;
@@ -224,6 +313,8 @@ export async function defendArea(
         if (!returned && reason === 'cleared') reason = 'return_timeout';
     } finally {
         stopPvp();
+        await drain();
+        restoreHooks();
         bot.pvp.movements = priorMovements;
         bot.pi_attackTargetId = null;
         bot.pi_attackStop = null;

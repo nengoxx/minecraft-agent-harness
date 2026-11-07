@@ -30,6 +30,7 @@ export async function equipHighestAttack(bot) {
     weapons.sort((a, b) => b.attackDamage - a.attackDamage);
     let weapon = weapons[0];
     if (weapon) await bot.equip(weapon, 'hand');
+    return weapon;
 }
 
 export async function craftRecipe(bot, itemName, num = 1) {

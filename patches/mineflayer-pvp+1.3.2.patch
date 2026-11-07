@@ -1,5 +1,5 @@
 diff --git a/node_modules/mineflayer-pvp/lib/PVP.js b/node_modules/mineflayer-pvp/lib/PVP.js
-index 758c2b3..7c7220e 100644
+index 758c2b3..409d5d4 100644
 --- a/node_modules/mineflayer-pvp/lib/PVP.js
 +++ b/node_modules/mineflayer-pvp/lib/PVP.js
 @@ -48,7 +48,7 @@ class PVP {
@@ -11,3 +11,38 @@ index 758c2b3..7c7220e 100644
          this.bot.on('entityGone', e => { if (e === this.target)
              this.stop(); });
      }
+@@ -188,7 +188,16 @@ class PVP {
+     /**
+      * Attempts to preform an attack on the target.
+      */
++    attackReady() {
++        if (this.canAttack && !this.canAttack()) {
++            this.timeToNextAttack = 0;
++            return false;
++        }
++        return true;
++    }
+     attemptAttack() {
++        if (!this.attackReady())
++            return;
+         if (!this.target)
+             return;
+         if (!this.wasInRange) {
+@@ -203,13 +212,13 @@ class PVP {
+             queue.add(cb => setTimeout(cb, 100));
+         }
+         queue.add(cb => {
+-            if (target !== this.target)
+-                throw 'Target changed!';
++            if (target !== this.target || !this.attackReady())
++                throw 'Attack deferred';
+             this.bot.lookAt(this.target.position.offset(0, this.target.height, 0), true).then(() => cb()).catch(err => cb(err));
+         });
+         queue.addSync(() => {
+-            if (target !== this.target)
+-                throw 'Target changed!';
++            if (target !== this.target || !this.attackReady())
++                throw 'Attack deferred';
+             this.bot.attack(this.target);
+             // @ts-expect-error
+             this.bot.emit('attackedTarget');

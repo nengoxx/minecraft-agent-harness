@@ -175,3 +175,31 @@ establish task completion. T06 evidence is archived under
 container are stopped; models configuration is restored to the direct backend.
 A shutdown EPIPE was recorded when the terminal output pipe closed on Ctrl+C;
 there was no such error during the active trial.
+
+## T07 — Pursuit and return, stopped for equipment correction
+
+Source ebd395f; task delivered 20:30:18.449 UTC on 2026-11-07. Fresh transcript,
+retained partial house and inventory, automatic defense, intended 45-minute
+limit. The request asked Qwen to finish the partially built small wooden house
+near the player, including floor, walls, roof, usable door and interior, preserving
+other builds. No operator construction plan or mid-task coaching was supplied.
+
+Stopped at 20:43:20.853 UTC after Ari observed dirt held during attacks. This was
+an integration defect, not the duration limit. Ten defense encounters occurred;
+movement, dirt towering, confirmed deaths and returns were observed. Return was
+not universal: the final encounter was cancelled away from its origin. Native
+combat consumed the starting 27 dirt, and the retained fake-stone workaround
+made scaffold accounting unreliable (H11). Do not count its 73 placement events
+as 73 actual placements: 63 named air. No house construction was completed.
+
+Before the first defense, Qwen spent roughly nine minutes reading, inspecting
+and walking, with no construction. Native actions were generally much faster
+than inference (sample responses roughly 49–93 seconds). Tool feedback included
+blocked movement, occlusion, and an SDK rejection of a string used as a boolean.
+These are observations, not proof that Qwen alone caused the unfinished task.
+Invincibility and changing world/inventory remain comparison confounds.
+
+Evidence: `.agent-state/evaluation/T07-pursuit-return/`, including wire capture,
+final state, transcript, observer snapshots and result.json. The agent, proxy
+and wire relay stopped, and direct backend configuration was restored. H10–H12
+must be qualified before claiming this version improves Mindcraft's combat.

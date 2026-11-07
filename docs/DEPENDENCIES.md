@@ -55,3 +55,8 @@ Keep one reused Docker shell container. ViaProxy remains a separate process,
 using its own project-local state. A repository fork is a maintenance destination,
 not an extra runtime component. No custom Mineflayer fork is required: pin the
 upstream source and keep the small reviewed patch set in this harness.
+
+T07 corrections remove pathfinder's fake local stone placement and add a narrow,
+optional PvP attack-readiness hook. Defense checks it before aiming and immediately
+before swinging so asynchronous equipment/placement work cannot produce dirt
+attacks. The existing plugin still owns pursuit, cooldowns and shield behavior.

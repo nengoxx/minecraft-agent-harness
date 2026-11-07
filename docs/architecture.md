@@ -96,7 +96,9 @@ The model's explicit `attack` tool retains its existing bounded combat routine.
   actual/engaged attackers within sixteen. Players and passive/neutral mobs are
   not proactive targets; provoked neutral attackers are eligible. PvP follows
   moving targets, including phantoms. It can use dirt scaffolding, limited to
-  eight placements per encounter. Combat does not dig. Existing built-block,
+  eight confirmed, uncertain or in-flight placements per encounter. Native placement
+  reservations enforce this even across path resets; the Movements scaffold count
+  also limits planning. Combat does not dig. Existing built-block,
   fall and lava guards still apply. Creepers use the same PvP behavior; shield
   tactics depend on the plugin and an equipped shield, not a new controller.
 - **Encounter and return:** one fixed work origin (last grounded position when
@@ -112,6 +114,12 @@ The model's explicit `attack` tool retains its existing bounded combat routine.
   reported rather than called cleared. Leftover scaffolding is reported, not
   silently deleted. The origin survives unsuccessful back-to-back encounters
   until a return succeeds, new body work runs, or the bot respawns.
+- **Equipment:** reuse Mindcraft weapon selection whenever the held item changes,
+  waiting for mining/placement to finish. Encounter-local equipment/placement tracking
+  remains busy across path resets. Unacknowledged placements retain their budget
+  reservation and block blind task retry. PvP checks readiness before aiming and before
+  swinging; it retries deferred attacks on a later tick. Server-confirmed blocks
+  determine scaffold reports; pathfinder never fabricates a local stone block.
 - **Ownership and stopping:** the runner offers opt-in `ownTicks()` so existing
   PvP/pathfinder physics listeners inherit the active action's ownership.
   Asynchronous callbacks retain their originating owner and cannot send late
@@ -186,7 +194,8 @@ coordination happens over DMs and the shared machine. See [multi-agent.md](multi
 `patches/` holds fixes to Mineflayer and its plugins, applied by `patch-package` on `npm install`: digging tool
 materials, inventory and block placement handling, entity velocity updates, collectblock pickup cancellation,
 pathfinder lava avoidance and stop behaviour, pvp updates on physics ticks, and suppression of protodef packet dumps.
-Dig-time calculations omit the water penalty because the bot's water-state calculation is unreliable.
+The upstream water penalty is retained; see DEPENDENCIES.md for the pinned source
+and exact carried patches.
 `src/vision/patches/` holds the renderer patch used by `npm run vision:install`.
 
 ## Process model and reconnects

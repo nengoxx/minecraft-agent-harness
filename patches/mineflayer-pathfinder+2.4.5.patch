@@ -1,5 +1,5 @@
 diff --git a/node_modules/mineflayer-pathfinder/index.js b/node_modules/mineflayer-pathfinder/index.js
-index b38bd30..b16b832 100644
+index b38bd30..476a46e 100644
 --- a/node_modules/mineflayer-pathfinder/index.js
 +++ b/node_modules/mineflayer-pathfinder/index.js
 @@ -14,6 +14,7 @@ const interactableBlocks = require('./lib/interactable.json')
@@ -76,15 +76,7 @@ index b38bd30..b16b832 100644
          }, err => {
            console.error(err)
            lockUseBlock.release()
-@@ -550,6 +572,7 @@ function inject (bot) {
-             lockEquipItem.release()
-             const refBlock = bot.blockAt(new Vec3(placingBlock.x, placingBlock.y, placingBlock.z), false)
-             if (!lockPlaceBlock.tryAcquire()) return
-+            bot.world.setBlockStateId(refBlock.position.offset(placingBlock.dx, placingBlock.dy, placingBlock.dz), 1)
-             if (interactableBlocks.includes(refBlock.name)) {
-               bot.setControlState('sneak', true)
-             }
-@@ -557,6 +580,7 @@ function inject (bot) {
+@@ -557,6 +579,7 @@ function inject (bot) {
                .then(function () {
                  // Dont release Sneak if the block placement was not successful
                  bot.setControlState('sneak', false)
@@ -92,7 +84,7 @@ index b38bd30..b16b832 100644
                  if (bot.pathfinder.LOSWhenPlacingBlocks && placingBlock.returnPos) returningPos = placingBlock.returnPos.clone()
                })
                .catch(_ignoreError => {
-@@ -576,7 +600,7 @@ function inject (bot) {
+@@ -576,7 +599,7 @@ function inject (bot) {
      let dx = nextPoint.x - p.x
      const dy = nextPoint.y - p.y
      let dz = nextPoint.z - p.z
@@ -101,7 +93,7 @@ index b38bd30..b16b832 100644
        // arrived at next point
        lastNodeTime = performance.now()
        if (stopPathing) {
-@@ -611,6 +635,9 @@ function inject (bot) {
+@@ -611,6 +634,9 @@ function inject (bot) {
      if (bot.entity.isInWater) {
        bot.setControlState('jump', true)
        bot.setControlState('sprint', false)
