@@ -176,3 +176,40 @@ now measure execution, not time waiting for another action. Synthetic checks
 cover concurrent inference, arbitration, cancellation, bounded targets and
 placement continuation. See architecture.md for the exact policy and remaining
 limits; this does not yet establish successful shelter construction.
+
+## H08 — Stationary flying-threat policy and no return-to-work phase
+
+T06 confirmed native swings and one phantom kill while inference continued, but
+Ari observed no movement or scaffolding. The controller explicitly used
+`chase: false` for flying mobs, a three-block trigger and no towers. This was our
+policy mismatch, not a Qwen or Mineflayer compatibility failure. Phantom timeout
+backoff also left subsequent hits to restart inference. No construction occurred.
+Ari clarified: clear nearby hostile/engaged mobs, return to the interrupted work
+position, then continue. The prior Mindcraft controller did not guarantee return.
+
+Revision uses the existing Mindcraft PvP/pathfinder plugins for pursuit, attacks
+and dirt climbing, with one native encounter/return wrapper. It retains the work
+origin across target changes, accepts secondary attackers, verifies the return,
+reports remaining scaffold and vetoes queued retries on failed return or danger.
+Forty-five-second combat and sixty-second encounter budgets bound unreachable
+threats; the whole-session trial remains forty-five minutes. Source and limits
+are documented in architecture.md. Offline validation: 351 tests, lint and formatting passed. Opus closed all three
+code-review blockers; the last grounded-origin and cancelled placement callback
+regressions also pass. Revised live qualification pending.
+
+## H09 — Plugin physics ticks lacked action ownership; PvP stop could affect later work
+
+A local fake-bot probe reproduced `LATE_MUTATION_REFUSED` for an attack from a
+physics listener during an active action. Listener registration predates the
+runner's AsyncLocalStorage context. Pathfinder scaffold writes have the same
+integration issue. Enabling plugin pursuit alone would therefore be incomplete.
+Opus also identified PvP's five-second path-stop fallback, longer than runner
+cleanup grace, and the modern `attack` packet missing from mutation guards.
+
+The runner now offers opt-in `ownTicks()`, preserving old ownership for delayed
+callbacks, guards the modern attack packet, and force-stops PvP during cleanup.
+The encounter flushes pathfinder stop state after target loss before beginning
+return or another pursuit. Tests use the actual installed PvP plugin to verify
+attacks during ownership, no swing after cancellation during aiming, prompt
+entityGone settlement and preservation of unrelated path-stop listeners.
+No dependency patch or second movement controller was needed.

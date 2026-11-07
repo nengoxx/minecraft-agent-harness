@@ -149,3 +149,29 @@ hashes still match the initial snapshot. Full code checks passed: 322 tests.
 Do not blindly resume the interrupted plan. Address H07 and report partial world
 changes before a further construction trial; preserve Qwen's ownership of plans.
 Iron gathering/smelting and successful shelter completion remain unqualified.
+
+## T06 — First native-defense qualification (stopped for policy revision)
+
+Source ee373ec, 338 offline tests passing, real Opus code review with no remaining
+blockers. Automatic defense enabled; fresh transcript/mailbox/notes and retained
+world/inventory. Planned process limit was 45 minutes. The ordinary request asked
+Qwen to continue and finish the existing small wooden house, preserving player
+builds; no coordinates, construction code or mid-task coaching were supplied.
+
+Task delivery 19:56:38.534 UTC; stopped at 20:01:49.437 UTC after Ari observed
+stationary phantom combat and clarified the desired behavior. This was a policy
+revision, not the process deadline. Five native defense encounters produced one
+confirmed phantom kill while model inference continued. No construction or
+movement occurred. Qwen made ten read/communication calls and was still planning.
+The explicit short-range, no-chase/no-tower flying policy caused stationary combat;
+this is a harness policy mismatch, not evidence Qwen refused to move. Phantom
+backoff also allowed unhandled hits to restart one model cycle.
+
+Ari wants Mindcraft-like active pursuit/scaffolding, clearing nearby hostiles and
+engaged attackers, then returning to the interrupted work position and continuing.
+The next revision must qualify both pursuit and return. Native kills alone do not
+establish task completion. T06 evidence is archived under
+`.agent-state/evaluation/T06-native-defense/`. The bot, proxy, wire relay and reused
+container are stopped; models configuration is restored to the direct backend.
+A shutdown EPIPE was recorded when the terminal output pipe closed on Ctrl+C;
+there was no such error during the active trial.

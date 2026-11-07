@@ -163,13 +163,12 @@ test('defense runs during pending inference, coalesces hits and does not trigger
         runner,
         perception: { isEntityVisible: () => true },
         intervalMs: 100000,
-        equip: async () => {},
-        fight: async () => {
+        encounter: async () => {
             fights++;
             fighting.resolve();
             await release.promise;
             delete bot.entities[target.id];
-            return { targetDied: true };
+            return { returned: true, resumeAllowed: true, targets: [{ targetDied: true }] };
         },
         onOutcome: e => events.push(e),
     });
@@ -188,6 +187,8 @@ test('defense runs during pending inference, coalesces hits and does not trigger
         await fighting.promise;
         assert.equal(modelFinished, false);
         for (let i = 0; i < 10; i++) assert.equal(defense.handleHit(target), true);
+        const secondAttacker = enemy(bot, 2);
+        assert.equal(defense.handleHit(secondAttacker), true);
         bot.pi_recentDamage = { type: 'mob_attack', at: Date.now() };
         bot.health = 19;
         bot.emit('health');
@@ -204,7 +205,7 @@ test('defense runs during pending inference, coalesces hits and does not trigger
     }
 });
 
-test('target policy avoids passive/neutral/player/creeper and distant flying threats; retries are bounded', async () => {
+test('target policy avoids passive/neutral/player and distant threats; unreachable targets back off', async () => {
     const { bot, runner } = fixture();
     let time = 100,
         fights = 0;
@@ -214,18 +215,17 @@ test('target policy avoids passive/neutral/player/creeper and distant flying thr
         now: () => time,
         perception: { isEntityVisible: () => true },
         intervalMs: 100000,
-        equip: async () => {},
-        fight: async () => {
+        encounter: async (_context, { choose, skip }) => {
             fights++;
-            return { stoppedBecause: 'lost_sight', swings: 0 };
+            skip(choose(null).id);
+            return { returned: true, resumeAllowed: false };
         },
     });
     try {
         enemy(bot, 1, { type: 'player', username: 'owner' });
         enemy(bot, 2, { type: 'animal', name: 'cow' });
         enemy(bot, 3, { name: 'enderman' });
-        enemy(bot, 4, { name: 'creeper' });
-        enemy(bot, 5, { name: 'phantom', position: new Vec3(5, 64, 0) });
+        enemy(bot, 5, { name: 'phantom', position: new Vec3(20, 64, 0) });
         defense.tick();
         await delay(10);
         assert.equal(fights, 0);
@@ -295,46 +295,6 @@ test('reflex low-health floor stops combat without another swing', async () => {
     );
     assert.equal(result.stoppedBecause, 'low_health');
     assert.equal(result.swings, 0);
-});
-
-test('nearby mobs share one bounded encounter and one pursuit origin', async () => {
-    const { bot, runner } = fixture();
-    let time = 100;
-    for (let id = 1; id <= 5; id++) enemy(bot, id);
-    const starts = [],
-        fights = [],
-        outcomes = [];
-    const defense = installDefense({
-        bot,
-        runner,
-        now: () => time,
-        intervalMs: 100000,
-        perception: { isEntityVisible: () => true },
-        equip: async () => {},
-        record: name => starts.push(name),
-        onOutcome: result => outcomes.push(result),
-        fight: async (args, context, helpers, options) => {
-            fights.push({ seconds: args.seconds, origin: options.origin });
-            time += args.seconds * 1000;
-            delete bot.entities[args.id];
-            bot.entity.position.x++;
-            return { targetDied: true, swings: 1, stoppedBecause: 'killed' };
-        },
-    });
-    try {
-        defense.tick();
-        await eventually(() => !defense.snapshot().active);
-        assert.deepEqual(starts, ['defense_start', 'defense_end']);
-        assert.deepEqual(
-            fights.map(f => f.seconds),
-            [4, 4, 2],
-        );
-        assert.ok(fights.every(f => f.origin.x === 0));
-        assert.equal(outcomes[0].targets.length, 3);
-        assert.equal(Object.keys(bot.entities).length, 2);
-    } finally {
-        await defense.close();
-    }
 });
 
 test('preempted crafting reports inventory progress and is never automatically replayed', async () => {
@@ -422,7 +382,7 @@ test('failed mutation retains its real error when defense arrives during invento
     await checked;
 });
 
-test('unhandled, backed-off and other attackers are not hidden; surfacing and environment take priority', async () => {
+test('fresh attacks clear backoff; surfacing and environmental danger take priority', async () => {
     const { bot, runner } = fixture();
     let time = 100;
     const target = enemy(bot),
@@ -433,15 +393,18 @@ test('unhandled, backed-off and other attackers are not hidden; surfacing and en
         now: () => time,
         perception: { isEntityVisible: () => true },
         intervalMs: 100000,
-        equip: async () => {},
-        fight: async () => ({ stoppedBecause: 'lost_sight', swings: 0 }),
+        encounter: async (_context, { choose, skip }) => {
+            skip(choose(null).id);
+            return { returned: true, resumeAllowed: false };
+        },
     });
     try {
         assert.equal(defense.handleHit(far), false);
         defense.tick();
         await eventually(() => !defense.snapshot().active);
         time += 2000;
-        assert.equal(defense.handleHit(target), false);
+        assert.equal(defense.handleHit(target), true);
+        await eventually(() => !defense.snapshot().active);
         bot.emit('death');
         assert.equal(defense.handleHit(target), false);
         bot.emit('spawn');
@@ -504,4 +467,92 @@ test('environmental and player danger stops native defense; routine other mobs d
     assert.equal(checks, 1);
     assert.equal(result.stoppedBecause, 'self_preservation');
     assert.equal(result.swings, 0);
+});
+
+test('unreachable ranged attackers remain visible to Qwen until they enter melee reach', async () => {
+    const { bot, runner } = fixture();
+    const target = enemy(bot, 1, { position: new Vec3(8, 64, 0) });
+    let time = 100,
+        calls = 0;
+    const defense = installDefense({
+        bot,
+        runner,
+        now: () => time,
+        intervalMs: 100000,
+        perception: { isEntityVisible: () => true },
+        encounter: async (_context, { choose, skip }) => {
+            calls++;
+            skip(choose(null).id, 'no_path');
+            return { returned: true, resumeAllowed: false };
+        },
+    });
+    try {
+        defense.tick();
+        await eventually(() => !defense.snapshot().active);
+        time += 2000;
+        for (let i = 0; i < 5; i++) assert.equal(defense.handleHit(target), false);
+        assert.equal(calls, 1);
+        target.position.x = 2;
+        assert.equal(defense.handleHit(target), true);
+        await eventually(() => !defense.snapshot().active);
+        assert.equal(calls, 2);
+    } finally {
+        await defense.close();
+    }
+});
+
+test('hits beyond the work-origin leash are not hidden during a pending encounter', async () => {
+    const { bot, runner } = fixture();
+    const started = latch(),
+        finish = latch();
+    enemy(bot, 1);
+    const defense = installDefense({
+        bot,
+        runner,
+        intervalMs: 100000,
+        perception: { isEntityVisible: () => true },
+        encounter: async () => {
+            bot.entity.position.x = 20;
+            started.resolve();
+            await finish.promise;
+            return { returned: false, resumeAllowed: false };
+        },
+    });
+    try {
+        defense.tick();
+        await started.promise;
+        const attacker = enemy(bot, 2, { position: new Vec3(21, 64, 0) });
+        assert.equal(defense.handleHit(attacker), false);
+    } finally {
+        finish.resolve();
+        await defense.close();
+    }
+});
+
+test('a jump interruption returns to the last grounded work position', async () => {
+    const { bot, runner } = fixture();
+    let captured;
+    const defense = installDefense({
+        bot,
+        runner,
+        intervalMs: 100000,
+        perception: { isEntityVisible: () => true },
+        encounter: async (_context, { origin }) => {
+            captured = origin;
+            return { returned: true, resumeAllowed: true };
+        },
+    });
+    try {
+        bot.entity.onGround = true;
+        bot.entity.position = new Vec3(3, 64, 0);
+        bot.emit('physicsTick');
+        bot.entity.onGround = false;
+        bot.entity.position = new Vec3(3.4, 65.2, 0);
+        enemy(bot, 1);
+        defense.tick();
+        await eventually(() => !defense.snapshot().active);
+        assert.deepEqual(captured, new Vec3(3, 64, 0));
+    } finally {
+        await defense.close();
+    }
 });

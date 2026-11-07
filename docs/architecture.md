@@ -80,54 +80,65 @@ schema against a committed snapshot, so moving code between files cannot change 
 
 ## Automatic defense
 
-`--auto-defense` (default off) enables `src/body/defense.js` alongside the Pi
-session. Its 300 ms local loop continues while the model reasons or waits.
-There is one Mineflayer bot and one body-action owner; no second model loop,
-container, modes registry or dependency was introduced.
+`--auto-defense` (default off) enables a 300 ms native controller independently
+of model inference. One action runner owns the body. The controller interrupts
+conflicting work, waits for cleanup, clears nearby hostile mobs, returns to the
+interrupted position and releases queued tools. Qwen retains task planning.
 
-The harness already derives `src/skills/` and `src/body/bot.js` from Mindcraft;
-see THIRD_PARTY_NOTICES.md. Defense reuses its weapon-selection helper and the
-existing bounded combat routine shared with `attack`. Mindcraft's native-loop,
-actual-attacker and close-flying-threat behavior informed the policy. Its whole
-modes/action/self-prompter stack is not imported.
+`src/body/defense.js` selects threats and handles lifecycle/events;
+`src/body/defense-combat.js` wraps the existing `mineflayer-pvp` and pathfinder
+plugins used by Mindcraft. The wrapper does not implement attack timing, aiming,
+shields or path search. It reuses Mindcraft-derived weapon selection and existing
+terrain guards. No new package, second planner, container or modes registry.
+The model's explicit `attack` tool retains its existing bounded combat routine.
 
-- The action runner has one priority gate. Defense cancels conflicting work,
-  waits for its complete cleanup, then owns the body. Queued model tools wait;
-  their execution deadlines start when they actually begin. Ordinary hit/DM
-  interrupts cannot abort the reflex. Model-selected `attack`, `flee` and
-  `return_to_surface` retain
-  control. Explicit stop cancels queued work and holds defense until new valid
-  body work or respawn; old interrupted calls cannot revive after stop.
-- Each encounter reuses `fightEntity`: up to eight targets within ten seconds,
-  at most four seconds per target and a twelve-second action deadline. All
-  targets share a four-block pursuit limit from the encounter's starting point,
-  with no digging/towering/parkour. Flying threats must be within three
-  blocks and are not chased. Players are never automatic targets. Passive and
-  neutral mobs are not attacked proactively; real attackers are remembered.
-  Creepers are left to the model. Unreachable or timed-out targets back off for thirty
-  seconds, with a one-second gap between engagements to avoid monopolizing work.
-- Defense yields at health eight or below, low oxygen, lava or burning.
-  Environmental damage and threats
-  outside its scope retain the existing model wake path. Automatic low-health
-  escape and shield-specific tactics are not implemented in this first slice.
-  Sleeping, death, explicit stop and shutdown inhibit reflex activity.
-- Routine handled hits retain raw telemetry but do not repeatedly restart model
-  inference or flood tool results. `defense_start`/`defense_end`, a coalesced
-  event and `automaticDefense` in observations distinguish reflexes from Qwen's
-  actions. The shared combat helper does not label reflex actions as model tools.
-- `place_line` and `break_area` checkpoint partial work through the existing
-  failure-facts channel, including an uncertain in-flight cell where applicable.
-  Cancelled tools report observed inventory changes and position. Placement and
-  `go_to` can retry at most twice after defense, checking current world state;
-  prior attempts remain in the result. Explicit cancellation never retries.
-  Interrupted scaffolding reports its remaining blocks and prevents automatic
-  replay, so Qwen can inspect and recover without losing track of temporary blocks.
-  Crafting, gathering, smelting, containers and whole shell scripts are not
-  automatically replayed. Qwen retains the task and decides their remaining work.
+- **Pursuit:** nearby hostiles within eight blocks, phantoms within twelve, and
+  actual/engaged attackers within sixteen. Players and passive/neutral mobs are
+  not proactive targets; provoked neutral attackers are eligible. PvP follows
+  moving targets, including phantoms. It can use dirt scaffolding, limited to
+  eight placements per encounter. Combat does not dig. Existing built-block,
+  fall and lava guards still apply. Creepers use the same PvP behavior; shield
+  tactics depend on the plugin and an equipped shield, not a new controller.
+- **Encounter and return:** one fixed work origin (last grounded position when
+  interrupted mid-jump), sixteen-block pursuit leash,
+  forty-five-second fight budget and up to sixty seconds for the whole encounter
+  (sixty-five-second hard deadline). Targets with no progress/path back off;
+  a fresh melee-range hit clears unreachable-target backoff. Ranged hits do
+  not repeatedly restart a pursuit already known to have no path. Additional attackers can interrupt the return
+  phase within that budget. Return pathfinding may dig natural terrain, including
+  its own dirt pillar. Cobblestone towers are disabled because the terrain guard
+  would prevent digging down through them. Return is verified within 1.5 blocks
+  horizontally and less than one vertically. Unreachable mobs/return routes are
+  reported rather than called cleared. Leftover scaffolding is reported, not
+  silently deleted. The origin survives unsuccessful back-to-back encounters
+  until a return succeeds, new body work runs, or the bot respawns.
+- **Ownership and stopping:** the runner offers opt-in `ownTicks()` so existing
+  PvP/pathfinder physics listeners inherit the active action's ownership.
+  Asynchronous callbacks retain their originating owner and cannot send late
+  mutation packets, including the modern `attack` packet. `forceStop` and an
+  immediate path reset avoid PvP's delayed stop fallback cancelling later work.
+  Model-selected `attack`, `flee` and `return_to_surface` retain control. Explicit
+  stop cancels queued work and holds defense until new valid body work or respawn.
+- **Preservation:** low health, low oxygen, lava, fire, player damage, death,
+  explicit stop or shutdown end combat without a forced return through danger.
+  Native fire/low-health escape is not implemented in this slice. A failed return,
+  unresolved engagement or aborted encounter invalidates queued retries. Checks
+  happen after the defense gate, so a placement cannot resume before its outcome.
+- **Progress and attribution:** `place_line`/`break_area` checkpoint completed and
+  uncertain in-flight work. Interrupted actions report inventory changes and
+  position. Placement and `go_to` retry at most twice after successful defense,
+  checking current state; crafting, gathering, containers and scripts never
+  automatically replay. Remaining placement scaffold prevents blind retry.
+  Routine accepted mob hits do not restart inference. Players/environment and
+  threats outside the controller's scope still wake Qwen. `defense_start/end`,
+  phase/origin in observations, and `origin` on placement/dig telemetry distinguish
+  native combat scaffolding from Qwen's construction. Results include targets,
+  confirmed deaths, return outcome, inventory deltas and remaining scaffold.
 
-Pi provides orchestration and persistence, not a verified Minecraft planner.
-Qwen still chooses the site, structure, resources and sequence. Native defense
-is assessed separately from house completion, which remains a live-test question.
+The first T06 version swung at phantoms without pursuing or towering. Ari rejected
+that policy; the revised implementation above reuses the actual PvP plugin.
+Offline tests and Opus review qualify integration, not live house completion or
+survival. See EVALUATION.md and ISSUES.md for observed outcomes.
 
 ### Other Mindcraft behavior considered
 

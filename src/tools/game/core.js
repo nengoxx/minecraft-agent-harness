@@ -70,13 +70,14 @@ export function createCore(ctx) {
                     const hits = [];
                     const onHit = ev => hits.push(ev);
                     if (body) bot.on?.('pi_hit', onHit);
-                    let value;
+                    let value, resumeFrom;
                     try {
                         for (;;) {
                             try {
                                 value = body
                                     ? await runner.run(toolName, invoke, {
                                           signal,
+                                          resumeFrom,
                                           timeoutMs:
                                               args.timeout_ms ??
                                               {
@@ -106,6 +107,7 @@ export function createCore(ctx) {
                                 )
                                     throw error;
                                 interruptedAttempts.push(failureFacts.get(error) ?? {});
+                                resumeFrom = error.resumeGeneration;
                             }
                         }
                         if (interruptedAttempts.length && value?.completed) {
@@ -150,7 +152,7 @@ export function createCore(ctx) {
                         }
                     }
                     let facts = failureFacts.get(error);
-                    if (body && error.name === 'AbortError') {
+                    if (body && (error.name === 'AbortError' || code === 'not_at_origin')) {
                         const after = counts(bot),
                             inventoryDelta = {};
                         for (const name of new Set([...Object.keys(inventoryBefore), ...Object.keys(after)])) {

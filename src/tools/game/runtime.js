@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { abortError, failureCode, failureFacts, withFailureCode, withFailureFacts } from './failures.js';
+import { abortError, failWith, failureCode, failureFacts, withFailureCode, withFailureFacts } from './failures.js';
 import { guardBuiltBlocks, installEdgeGuard, installSwimGuard } from './guards.js';
 
 const compatibility = Symbol('piSkillCompatibility');
@@ -86,9 +86,9 @@ export function settleInventory(bot, { quietMs = 250, maxMs = 1500 } = {}) {
 export async function stopBody(bot, { closeWindow = false } = {}) {
     bot.interrupt_code = true;
     const calls = [
+        () => (bot.pvp?.forceStop ? bot.pvp.forceStop() : bot.pvp?.stop()),
         () => bot.pathfinder?.setGoal(null),
         () => bot.pathfinder?.stop(),
-        () => bot.pvp?.stop(),
         () => bot.collectBlock?.cancelTask(),
         () => bot.stopDigging?.(),
         () => bot.deactivateItem?.(),
@@ -196,6 +196,7 @@ const mutationPackets = new Set([
     'block_place',
     'use_item',
     'use_entity',
+    'attack',
     'window_click',
     'held_item_slot',
     'arm_animation',
@@ -212,6 +213,16 @@ function installActionBoundary(bot) {
     if (actionBoundaries.has(bot)) return actionBoundaries.get(bot);
     const context = new AsyncLocalStorage();
     const boundary = { context, blocked: false };
+    if (typeof bot.emit === 'function') {
+        const emit = bot.emit;
+        bot.emit = function (event, ...args) {
+            // Plugin listeners predate the action. Their asynchronous work must
+            // inherit its owner too; an already scoped late callback keeps its old owner.
+            if (event === 'physicsTick' && boundary.tickOwner && !context.getStore())
+                return context.run(boundary.tickOwner, () => emit.call(this, event, ...args));
+            return emit.call(this, event, ...args);
+        };
+    }
     const assertCurrent = (allowUnscoped = false) => {
         const owner = context.getStore();
         if (!owner && allowUnscoped) return;
@@ -367,6 +378,9 @@ export function createActionRunner(
     let current = null;
     let fatal = null;
     let stopGeneration = 0;
+    let resumeGeneration = 0;
+    let resumeFailure;
+    let workRevision = 0;
     let reflexGate = Promise.resolve();
     let reflexPending = false;
     let reflexHeld = false;
@@ -390,6 +404,7 @@ export function createActionRunner(
                 blocked: Boolean(fatal),
                 reflexPending,
                 reflexHeld,
+                workRevision,
             };
         },
         interrupt(reason) {
@@ -399,9 +414,17 @@ export function createActionRunner(
         resumeReflexes() {
             reflexHeld = false;
         },
+        vetoResume(facts) {
+            resumeGeneration++;
+            resumeFailure = facts;
+        },
         canResume(error) {
             return (
-                error.preemptedBy === 'defense' && error.actionGeneration === stopGeneration && !reflexHeld && !fatal
+                error.preemptedBy === 'defense' &&
+                error.actionGeneration === stopGeneration &&
+                error.resumeGeneration === resumeGeneration &&
+                !reflexHeld &&
+                !fatal
             );
         },
         async stop() {
@@ -426,7 +449,11 @@ export function createActionRunner(
             }
             return { stopped: !fatal, blocked: Boolean(fatal) };
         },
-        async run(name, fn, { signal, timeoutMs = defaultTimeoutMs, reflex = false } = {}) {
+        async run(
+            name,
+            fn,
+            { signal, timeoutMs = defaultTimeoutMs, reflex = false, resumeFrom = resumeGeneration } = {},
+        ) {
             if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > maxTimeoutMs)
                 throw new Error('Invalid action deadline.');
             if (fatal) throw fatal;
@@ -444,6 +471,7 @@ export function createActionRunner(
                     Object.assign(abortError('Interrupted by automatic defense'), {
                         preemptedBy: 'defense',
                         actionGeneration: generation,
+                        resumeGeneration,
                     }),
                 );
             }
@@ -465,7 +493,16 @@ export function createActionRunner(
                 if (fatal) throw fatal;
                 if (controller.signal.aborted) throw controller.signal.reason;
                 if (generation !== stopGeneration) throw abortError('Queued action cancelled by stop');
-                if (!reflex) reflexHeld = false;
+                if (!reflex && resumeFrom !== resumeGeneration)
+                    throw failWith(
+                        'not_at_origin',
+                        'Defense did not safely return to the task. Inspect before continuing.',
+                        resumeFailure,
+                    );
+                if (!reflex) {
+                    reflexHeld = false;
+                    workRevision++;
+                }
                 assertSurvival(bot);
                 boundary.ensure();
                 const owner = { signal: controller.signal, active: true };
@@ -498,6 +535,9 @@ export function createActionRunner(
                             bot: actionBot(bot, controller.signal),
                             signal: controller.signal,
                             deadline,
+                            ownTicks: () => {
+                                boundary.tickOwner = owner;
+                            },
                             reportProgress: value => {
                                 progress = value;
                             },
@@ -518,6 +558,7 @@ export function createActionRunner(
                 }
                 if (slotChanges && !controller.signal.aborted) await settleInventory(bot);
                 owner.active = false;
+                if (boundary.tickOwner === owner) boundary.tickOwner = null;
                 if (controller.signal.aborted) stop();
                 stopping ??= stopBody(bot);
                 let grace;
@@ -544,6 +585,7 @@ export function createActionRunner(
                             name: original.name,
                             preemptedBy: original.preemptedBy,
                             actionGeneration: original.actionGeneration,
+                            resumeGeneration: original.resumeGeneration,
                         });
                         withFailureCode(error, failureCode(original));
                         throw withFailureFacts(error, { ...failureFacts.get(original), partial: progress });

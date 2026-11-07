@@ -428,8 +428,12 @@ export async function startAgent(settings, options = {}) {
                 );
             lowOxygen = low;
         });
-        bot.on('diggingCompleted', block => record('dig', { block: block.name, position: block.position }));
-        bot.on('blockPlaced', (_old, block) => record('place', { block: block.name, position: block.position }));
+        bot.on('diggingCompleted', block =>
+            record('dig', { block: block.name, position: block.position, origin: actionRunner.status.origin }),
+        );
+        bot.on('blockPlaced', (_old, block) =>
+            record('place', { block: block.name, position: block.position, origin: actionRunner.status.origin }),
+        );
         const { Camera } = withImages ? await import('./vision/camera.js') : {};
         if (withImages)
             camera = new Camera(bot, path.join(root, 'frames'), {
