@@ -35,6 +35,13 @@ What's in here:
 - Teams from a single JSON file, with DMs between agents and an optional shared machine
 - Vision, if you want it (experimental)
 
+## Local Qwen fork
+
+This fork maintains an isolated local-Qwen evaluation and a pinned, current
+Mineflayer compatibility baseline. Follow [local setup](docs/local-qwen.md),
+[dependency decisions](docs/DEPENDENCIES.md), and [trial results](docs/EVALUATION.md).
+The upstream quickstart below describes its general-purpose setup.
+
 ## Quickstart
 
 You'll need Node 22.19+, an API key for some model provider, and a Minecraft server. If you don't have a server, the
