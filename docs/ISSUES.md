@@ -52,8 +52,9 @@ normalization remains necessary on the newer Mineflayer stack.
 
 Protocol/model smoke success is not construction or resource-task competence.
 Recorded model requests use medium reasoning and 8192 maximum output tokens;
-Ari confirms Strata maps medium to a 2048-token reasoning budget internally.
-No independent backend-internal enforcement measurement is claimed.
+Earlier configuration assumed medium mapped to a 2048-token budget. H06 records
+why the launcher now sends the explicit budget field too. No independent
+backend-internal token enforcement measurement is claimed.
 
 ## H04 — Completed request replay and restart pressure (observed; unresolved)
 
@@ -94,3 +95,75 @@ This establishes prolonged generation, not a hung Mineflayer action. Next steps:
 verify actual backend reasoning-budget enforcement, reproduce message replay,
 and inspect the observation/prompt load before adjusting general planning
 instructions. Do not replace Qwen with an operator-authored shelter script.
+
+T05 with the explicit budget made more progress: one zombie killed, movement,
+31 natural blocks cleared in three valid batches, then eight planks placed.
+It attempted wall rows before establishing support/foundation, producing partial
+`no_support` failures. The 15-minute deadline ended the unfinished task. This is
+evidence of working batch mechanics and an observed sequencing error, not proof
+that request configuration or combat automation alone will solve construction.
+
+## H06 — Explicit Strata reasoning budget missing (request correction validated)
+
+T04 used the exact Mindcraft house prompt with a fresh Pi transcript, mailbox and
+workspace notes (old state archived; world/inventory retained). No game actions
+were executed: after four message/plan reads, the next backend response continued
+reasoning for 139.848 seconds until terminal stop. The raw HTTP response and Pi's
+saved aborted message match exactly (8,565 reasoning characters). This rules out
+SDK duplication of that passage and a Mineflayer action waiting underneath it.
+
+Wire capture confirms `reasoning_effort: medium`, `max_tokens: 8192`, but no
+`reasoning_budget_tokens`. Mindcraft's qualification record explicitly sent 2048.
+A direct, non-executing replay of the captured request with only that field added
+returned `send_dm` and `observe_world` calls in 74.751 seconds: 2,213 total output
+tokens reported by the backend, 6,265 reasoning characters, 2,064 nonempty
+reasoning deltas. Delta count is not an independently verified token count.
+No replayed game tool was executed and no generated plan was fed into the trial.
+The user confirmed no other workload was expected on the single-request backend.
+
+Correction: load the small local `strata-budget` extension through Pi's existing
+request hook; do not patch Pi or change backend-wide defaults. Explicit extension
+paths are supported through the SDK loader; automatic discovery stays off.
+A real-SDK/mock-HTTP regression verifies the actual outgoing budget, unaffected
+other providers, upstream todo loading, missing-extension rejection and absence
+of built-in host tools. Full checks: 322 passed. T05's live wire capture also
+confirms the explicit field. Task-level success remains to be evaluated.
+
+Evidence: `.agent-state/evaluation/T04-exact-prompt/` (raw requests/SSE, exact
+wire-versus-Pi comparison, budget replay) and `T05-explicit-budget/`.
+
+## H07 — No automatic defense controller (confirmed; not yet implemented)
+
+Mindcraft's `src/agent/modes.js` has a tick-driven `self_defense` mode that calls
+`skills.defendSelf`, arbitrates against other actions, and resumes or reprompts
+after interruption. This is application behavior above Mineflayer, not a
+Mineflayer setting. The harness loads `mineflayer-pvp` and retains `defendSelf`,
+but `installSkillCompatibility` explicitly replaces the modes controller with
+`isOn: () => false`; no autonomous caller activates that skill.
+
+The current harness sends hit events and grouped hit alerts to the model. Hits
+can restart a model cycle and interrupt gathering, crafting and placement;
+walking/fleeing continue. The bounded `attack` tool handles individual swings
+without model calls, but Qwen must choose each fight. In T05 it killed a zombie
+and walked to another site, while repeated phantom/zombie hits continued and a
+later tool response included 40 grouped hits. Ari confirmed the bot is invincible
+in this test. Constant health therefore does not refute these attacks or prove
+a health/protocol bug. No automatic defense was enabled during T05.
+
+This is a confound for construction evaluation, not proof that every planning
+error comes from combat. For example, T05 also requested a 343-block clear when
+`break_area` explicitly caps each call at 96 blocks.
+
+Recommended next change: an optional native defense controller using existing
+bounded combat actions and the same serialized action runner. Retain the task,
+react without inference, limit pursuit and duration, exclude players/passive
+animals, aggregate routine combat into one summary, and surface unresolved danger.
+Stop/death/disconnection must cancel it. Interrupted world edits must preserve
+and report partial progress; never blindly replay a whole crafting/build batch.
+First verify defense latency, cancellation and task continuation, then repeat
+the exact house request. No operator-authored construction plan should be added.
+
+Do not transplant Mindcraft's entire modes system or simply enable the PvP
+plugin alongside current movement. Both need exclusive control of the body;
+the copied `isHostile` helper also classifies most `mob` entities broadly. Pi's
+request/planning extensions do not replace a native real-time controller.

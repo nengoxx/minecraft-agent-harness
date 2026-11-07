@@ -25,6 +25,7 @@ case "$mode" in
             --models-file "$harness_root/.agent-state/local/models.json"
             --state-dir "$harness_root/.agent-state/game"
             --thinking medium --sandbox docker)
+        command+=(--pi-extension "$harness_root/extensions/strata-budget.js")
         ;;
     *)
         echo 'Usage: bash scripts/local-harness.sh install|check|probe'

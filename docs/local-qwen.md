@@ -60,9 +60,13 @@ bash scripts/local-harness.sh probe
 ```
 
 This synthetic model test exercises streaming, tools, retry and session replay
-without joining Minecraft. Medium reasoning is sent to Strata, which Ari has
-configured to map it to a 2048-token reasoning budget. Maximum output is 8192.
-The probe verifies requests, not the backend's internal budget implementation.
+without joining Minecraft. Medium reasoning and `max_tokens: 8192` are sent to Strata. The launcher now loads
+`extensions/strata-budget.js`, using Pi's standard `before_provider_request` hook
+to add `reasoning_budget_tokens: 2048`. This matches Mindcraft's explicit request.
+A medium-only live request continued reasoning for 140 seconds without a tool
+call; replaying the captured payload with the explicit budget returned tool calls
+in 74.75 seconds. These single runs are evidence for the configuration correction,
+not a controlled benchmark or proof of task success.
 
 After arranging exclusive ownership of the bot identity and a running server or
 proxy, use explicit connection arguments, for example:
@@ -88,3 +92,25 @@ extra Minecraft server container, global Pi installation or cloud model is neede
 Incoming player whispers enter the native mailbox and `send_dm` replies in game.
 An initial CLI objective is a system instruction, not a player chat message.
 Operator-injected trial messages are recorded separately from actual network chat.
+
+## Explicit Pi extensions
+
+Use repeatable `--pi-extension /absolute/path/to/extension.js`, or `piExtensions`
+as an array in the JSON config. Pi loads only those explicit paths; global and
+project auto-discovery remain disabled. A missing/invalid extension fails startup.
+The extension's registered tools are available alongside game tools, without
+activating Pi's built-in host shell/file tools. Extensions themselves execute in
+the host SDK process, so load reviewed code appropriate for that trust boundary.
+
+This uses the installed Pi SDK's resource loader and lifecycle, not a new plugin
+system. The Strata extension changes only medium requests for the `corsair`
+Chat Completions provider and preserves an already-explicit budget. Other
+providers/reasoning levels are unchanged. The synthetic regression loads Pi's
+unmodified upstream todo example as well, proving that existing extensions can
+be used when needed. No planning/todo extension is enabled in live trials yet.
+
+The standard Pi plan-mode example is a coding exploration/interactive approval
+workflow. It does not solve a backend reasoning-budget mismatch, and its default
+coding-tool workflow is not a suitable drop-in gameplay controller. The harness
+already supplies persistent notes and `read_plan`/`append_plan` tools. Add further
+planning machinery only after a repeatable failure demonstrates what is missing.

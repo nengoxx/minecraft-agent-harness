@@ -162,3 +162,13 @@ Everything lives under `--state-dir` (default `.agent-state/`):
 
 Telemetry tool events include the call's arguments (clipped to 500 characters) and a short result. Delete an agent's
 directory to start it from scratch.
+
+## Pi extensions
+
+`--pi-extension <local-path>` may be repeated; the corresponding JSON setting is
+`"piExtensions": ["./extensions/example.js"]`. Paths resolve from the launch
+working directory. Only explicitly listed extensions load; inherited Pi extensions,
+skills and context files remain disabled. Invalid extensions fail startup.
+Extensions may register tools and use Pi's existing lifecycle/provider hooks.
+The host SDK runs extension code; the Docker sandbox applies to `run_shell`.
+See [local Qwen setup](local-qwen.md) for the optional Strata budget extension.

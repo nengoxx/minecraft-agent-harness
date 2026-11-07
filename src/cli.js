@@ -23,6 +23,7 @@ const RUN_OPTIONS = {
     'base-url': { type: 'string' },
     'models-file': { type: 'string' },
     thinking: { type: 'string' },
+    'pi-extension': { type: 'string', multiple: true },
     sandbox: { type: 'string' },
     'docker-image': { type: 'string' },
     vision: { type: 'boolean' },
@@ -53,6 +54,7 @@ const FLAG_TO_KEY = {
     'base-url': 'baseUrl',
     'models-file': 'modelsFile',
     thinking: 'thinking',
+    'pi-extension': 'piExtensions',
     sandbox: 'sandbox',
     'docker-image': 'dockerImage',
     vision: 'vision',
@@ -98,6 +100,7 @@ Model
       --thinking <level>     off | minimal | low | medium | high | xhigh (default ${DEFAULTS.thinking})
       --base-url <url>       OpenAI Responses compatible endpoint; key from MODEL_API_KEY
       --models-file <path>   pi models.json with custom providers
+      --pi-extension <path>  explicit local Pi extension; repeatable (automatic discovery stays off)
 
 Sandbox
       --sandbox <kind>       none | local | docker | e2b      (AGENT_SANDBOX; default e2b with E2B_API_KEY,

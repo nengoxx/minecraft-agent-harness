@@ -37,6 +37,7 @@ export async function createPiSession(options, modules) {
         agentDir: directory,
         settingsManager,
         noExtensions: true,
+        additionalExtensionPaths: options.piExtensions ?? [],
         noSkills: true,
         noPromptTemplates: true,
         noThemes: true,
@@ -44,6 +45,10 @@ export async function createPiSession(options, modules) {
         systemPrompt: options.systemPrompt,
     });
     await resourceLoader.reload();
+    const extensions = resourceLoader.getExtensions?.();
+    if (extensions?.errors.length)
+        throw new Error(`Pi extension load failed: ${extensions.errors.map(e => `${e.path}: ${e.error}`).join('; ')}`);
+    const extensionTools = extensions?.extensions.flatMap(extension => [...extension.tools.keys()]) ?? [];
     const sessionManager = sdk.SessionManager.continueRecent(options.cwd, directory);
     const { session } = await sdk.createAgentSession({
         cwd: options.cwd,
@@ -55,9 +60,10 @@ export async function createPiSession(options, modules) {
         settingsManager,
         resourceLoader,
         noTools: 'builtin',
-        tools: options.tools.map(tool => tool.name),
+        tools: [...new Set([...options.tools.map(tool => tool.name), ...extensionTools])],
         customTools: options.tools,
     });
+    if (options.piExtensions?.length) await session.bindExtensions({ mode: 'json' });
     return { session, sessionManager, compatible: Boolean(m.baseUrl) };
 }
 

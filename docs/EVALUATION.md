@@ -101,7 +101,44 @@ Final offline validation: lint/format and 320 tests passed, none skipped.
   trial, not a controlled comparison or evidence that the harness is superior.
   Evidence: `.agent-state/evaluation/T03-shelter-upgraded/`.
 
-The candidate bot and its separate proxy were stopped after T03. The one reused
-Docker container is stopped, retained for the next trial. Do not launch blindly
-into the interrupted T03 plan; diagnose H04/H05 before resuming construction.
+- T04 exact Mindcraft house request, fresh transcript/mailbox/notes, retained
+  world/inventory: four read-only message/plan calls, then 139.848 seconds of
+  reasoning until operator stop, no gameplay. Raw response reasoning exactly
+  matched the Pi transcript. Wire capture exposed the missing explicit
+  `reasoning_budget_tokens: 2048`; medium effort alone was sent. A sequential,
+  non-executing replay adding only that field returned tool calls in 74.751
+  seconds. This is diagnostic evidence, not a controlled performance benchmark.
+  See H06 and `.agent-state/evaluation/T04-exact-prompt/`.
+
+T05 repeats the exact request with the explicit budget provided through Pi's
+standard extension hook. It starts fresh again, retains world/inventory, and
+reuses the same Docker container. No model-generated replay plan is injected.
+Only the game session issues inference requests; passive wire capture forwards
+them unchanged. Automatic defense remains absent, a confound documented in H07.
+
+The 15-minute process deadline stopped T05 at 19:13:37 UTC, 891.004 seconds after
+task delivery. It killed one zombie, walked about 14 blocks, recovered from an
+oversized clearing request and cleared 31 natural blocks in three valid batches
+(24.151 seconds including the shell wrapper). Four wall-row batches then placed
+eight oak planks; most requested cells lacked support because the foundation
+was not established first. Inventory confirms 79 to 71 oak planks; eight placement
+events agree. No completed floor, roof, door installation, house verification or
+completion report. The partial build remains around x=-2359..-2360, y=112,
+z=-229..-223. Additional native preparation digging occurred during placement;
+the complete telemetry contains 36 digging events, not only the clearing batch.
+
+All 14 captured requests carry the explicit 2048 budget. There were 270 hurt
+events, including 266 attributed to mobs, with health/food remaining 20. Ari
+confirmed invincibility; this is not a survival qualification. Two SDK validation
+errors (overlong DM and unsupported read-plan argument) are visible in the Pi
+transcript rather than native tool telemetry. Placement results explicitly show
+partial failures even where the tool/shell reports successful execution. No
+operator gameplay, construction plan or mid-task coaching was provided.
+Evidence: `.agent-state/evaluation/T05-explicit-budget/`.
+
+Bot, separate proxy, passive HTTP relay and reused Docker container are stopped.
+The models file is restored to the direct backend URL. Global Pi configuration
+hashes still match the initial snapshot. Full code checks passed: 322 tests.
+Do not blindly resume the interrupted plan. Address H07 and report partial world
+changes before a further construction trial; preserve Qwen's ownership of plans.
 Iron gathering/smelting and successful shelter completion remain unqualified.

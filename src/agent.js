@@ -621,6 +621,7 @@ export async function startAgent(settings, options = {}) {
             model,
             modelsPath: options.modelsPath,
             thinkingLevel: options.thinkingLevel,
+            piExtensions: options.piExtensions,
             resumeThinkingLevel: 'minimal',
             reconnected: reconnecting,
             tools,

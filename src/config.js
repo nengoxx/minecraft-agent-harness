@@ -95,6 +95,11 @@ export function resolveConfig(
     if (!['survival', 'creative'].includes(raw.gameMode))
         errors.push(`gameMode must be survival or creative, got ${raw.gameMode}`);
     if (!THINKING.includes(raw.thinking)) errors.push(`thinking must be one of ${THINKING.join(', ')}`);
+    if (
+        raw.piExtensions !== undefined &&
+        (!Array.isArray(raw.piExtensions) || raw.piExtensions.some(p => typeof p !== 'string' || !p.trim()))
+    )
+        errors.push('piExtensions must be an array of nonempty local file paths');
     const tickRate = Number(raw.tickRate);
     if (!(tickRate > 0 && tickRate <= 20)) errors.push('tickRate must be between 1 and 20');
     const sandbox = raw.sandbox ?? defaultSandbox(env, probeDocker);
@@ -139,6 +144,7 @@ export function resolveConfig(
         apiKey: raw.baseUrl ? env.MODEL_API_KEY : undefined,
         modelsPath: raw.modelsFile ? path.resolve(cwd, raw.modelsFile) : null,
         thinking: raw.thinking,
+        piExtensions: (raw.piExtensions ?? []).map(p => path.resolve(cwd, p)),
         tickRate,
         vision: bool(raw.vision),
         respawn: bool(raw.respawn),
@@ -198,6 +204,7 @@ export function toAgentOptions(config) {
         apiKey: config.apiKey,
         modelsPath: config.modelsPath,
         thinkingLevel: config.thinking,
+        piExtensions: config.piExtensions,
         vision: config.vision,
         tickRate: config.tickRate,
         respawn: config.respawn,

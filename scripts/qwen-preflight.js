@@ -23,6 +23,7 @@ const options = {
     modelsPath,
     model,
     thinkingLevel: 'medium',
+    piExtensions: [resolve('extensions/strata-budget.js')],
     systemPrompt:
         'You are testing a synthetic tool protocol. There is no Minecraft connection. Follow the test request exactly.',
     tools: [
@@ -54,11 +55,14 @@ const options = {
 };
 let session;
 const watch = current => {
-    current.agent.onPayload = payload => {
+    const originalPayload = current.agent.onPayload?.bind(current.agent);
+    current.agent.onPayload = async (payload, model) => {
+        payload = (await originalPayload?.(payload, model)) ?? payload;
         assert.ok(requests.length < 6, 'Preflight request limit exceeded');
         assert.equal(payload.model, model.id);
         assert.equal(payload.max_tokens, 8192);
         assert.equal(payload.reasoning_effort, 'medium');
+        assert.equal(payload.reasoning_budget_tokens, 2048);
         assert.equal(payload.stream, true);
         requests.push({
             model: payload.model,
@@ -69,6 +73,7 @@ const watch = current => {
             roles: payload.messages.map(message => message.role),
             toolResults: payload.messages.filter(message => message.role === 'tool').map(message => message.content),
         });
+        return payload;
     };
     current.subscribe(event => {
         events[event.type] = (events[event.type] ?? 0) + 1;
@@ -113,7 +118,7 @@ try {
         `Qwen streaming, structured tools, tool error/retry and session resume passed (${requests.length} model calls).`,
     );
     console.log(`Evidence: ${runDir}`);
-    console.log('Wire settings: medium reasoning, max_tokens 8192; no explicit 2048-token reasoning budget.');
+    console.log('Wire settings: medium reasoning, max_tokens 8192, explicit reasoning_budget_tokens 2048.');
 } catch (error) {
     await writeFile(
         join(runDir, 'report.json'),
